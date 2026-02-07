@@ -16,9 +16,9 @@ var ErrBuffFull = errors.New("chanx: buffer is full")
 
 // Closable wraps a channel with idempotent close and panic-safe send.
 //
-// Go channels panic on double close and on send-after-close. Closable
-// converts these panics into errors, making it safe to use in
-// concurrent teardown scenarios.
+// Go channels panic on double close and on send-after-close. Closable prevents
+// send-after-close panics when used correctly.
+// making it safe to use in concurrent teardown scenarios.
 //
 // Note: Unlike raw Go channels, the underlying data channel is NOT closed
 // when Close() is called. Use Done() to detect closure in select statements.
@@ -47,12 +47,6 @@ func (c *Closable[T]) Send(v T) (err error) {
 	if c.isClosed.Load() {
 		return ErrClosed
 	}
-
-	defer func() {
-		if recover() != nil {
-			err = ErrClosed
-		}
-	}()
 
 	select {
 	case c.ch <- v:

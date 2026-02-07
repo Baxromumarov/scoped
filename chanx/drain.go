@@ -6,9 +6,17 @@ import "context"
 // The returned channel yields values from in until in is closed or ctx
 // is canceled, whichever comes first.
 //
+// If in is nil, returns a closed channel immediately.
 // The internal goroutine exits promptly on cancellation, preventing leaks.
 func OrDone[T any](ctx context.Context, in <-chan T) <-chan T {
 	out := make(chan T)
+
+	// Handle nil input channel - return closed channel immediately
+	if in == nil {
+		close(out)
+		return out
+	}
+
 	go func() {
 		defer close(out)
 		for {

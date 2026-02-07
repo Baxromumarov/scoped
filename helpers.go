@@ -13,15 +13,27 @@ import (
 //	err := scoped.ForEach(ctx, URLs, func(ctx context.Context, u string) error {
 //	    return fetch(ctx, u)
 //	}, scoped.WithLimit(10))
-func ForEach[T any](ctx context.Context, items []T, fn func(ctx context.Context, item T) error, opts ...Option) error {
-	return Run(ctx, func(s *Scope) {
-		for i, item := range items {
-			item := item // capture for Go < 1.22
-			s.Go(fmt.Sprintf("foreach[%d]", i), func(ctx context.Context) error {
-				return fn(ctx, item)
-			})
-		}
-	}, opts...)
+func ForEach[T any](
+	ctx context.Context,
+	items []T,
+	fn func(ctx context.Context, item T) error,
+	opts ...Option,
+) error {
+	return Run(
+		ctx,
+		func(s *Scope) {
+			for i, item := range items {
+				item := item // capture for Go < 1.22
+				s.Go(
+					fmt.Sprintf("foreach[%d]", i),
+					func(ctx context.Context) error {
+						return fn(ctx, item)
+					},
+				)
+			}
+		},
+		opts...,
+	)
 }
 
 // Map executes fn for each item concurrently and collects the results
@@ -34,21 +46,36 @@ func ForEach[T any](ctx context.Context, items []T, fn func(ctx context.Context,
 //	prices, err := scoped.Map(ctx, products, func(ctx context.Context, p Product) (float64, error) {
 //	    return fetchPrice(ctx, p)
 //	}, scoped.WithLimit(5))
-func Map[T, R any](ctx context.Context, items []T, fn func(ctx context.Context, item T) (R, error), opts ...Option) ([]R, error) {
+func Map[T, R any](
+	ctx context.Context,
+	items []T,
+	fn func(ctx context.Context, item T) (R, error),
+	opts ...Option,
+) (
+	[]R,
+	error,
+) {
 	results := make([]R, len(items))
-	err := Run(ctx, func(s *Scope) {
-		for i, item := range items {
-			i, item := i, item // capture for Go < 1.22
-			s.Go(fmt.Sprintf("map[%d]", i), func(ctx context.Context) error {
-				r, err := fn(ctx, item)
-				if err != nil {
-					return err
-				}
-				results[i] = r // safe: each goroutine writes a unique index
-				return nil
-			})
-		}
-	}, opts...)
+	err := Run(
+		ctx,
+		func(s *Scope) {
+			for i, item := range items {
+				i, item := i, item // capture for Go < 1.22
+				s.Go(
+					fmt.Sprintf("map[%d]", i),
+					func(ctx context.Context) error {
+						r, err := fn(ctx, item)
+						if err != nil {
+							return err
+						}
+						results[i] = r // safe: each goroutine writes a unique index
+						return nil
+					},
+				)
+			}
+		},
+		opts...,
+	)
 	if err != nil {
 		return nil, err
 	}

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Buffer collects values from in into slices of up to size elements.
+// Buffer collects values from "in" into slices of up to size elements.
 // A batch is emitted when it reaches size elements or when timeout
 // elapses since the first item in the current batch, whichever comes
 // first. The output channel is closed when in is closed or ctx is
@@ -13,7 +13,12 @@ import (
 //
 // Buffer panics if size is not positive or timeout is not positive.
 // If in is nil, returns a closed channel immediately.
-func Buffer[T any](ctx context.Context, in <-chan T, size int, timeout time.Duration) <-chan []T {
+func Buffer[T any](
+	ctx context.Context,
+	in <-chan T,
+	size int,
+	timeout time.Duration,
+) <-chan []T {
 	if size <= 0 {
 		panic("chanx: Buffer requires size > 0")
 	}

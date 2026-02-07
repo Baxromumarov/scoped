@@ -9,6 +9,7 @@ import (
 // (fan-in). The output channel is closed when all inputs are closed or
 // the context is canceled. The order of values is non-deterministic.
 //
+// Nil channels are skipped (they would block forever).
 // Every internal goroutine is tied to ctx and will exit promptly on
 // cancellation.
 func Merge[T any](ctx context.Context, chs ...<-chan T) <-chan T {
@@ -16,6 +17,9 @@ func Merge[T any](ctx context.Context, chs ...<-chan T) <-chan T {
 
 	var wg sync.WaitGroup
 	for _, ch := range chs {
+		if ch == nil {
+			continue // Skip nil channels
+		}
 		ch := ch // capture for Go < 1.22
 		wg.Add(1)
 		go func() {
@@ -50,6 +54,7 @@ func Merge[T any](ctx context.Context, chs ...<-chan T) <-chan T {
 // round-robin order. Each output channel is closed when in is closed
 // or the context is canceled.
 //
+// If in is nil, all output channels are closed immediately.
 // This is useful for distributing work to a fixed set of workers.
 // FanOut panics if n is not positive.
 func FanOut[T any](ctx context.Context, in <-chan T, n int) []<-chan T {
@@ -59,7 +64,19 @@ func FanOut[T any](ctx context.Context, in <-chan T, n int) []<-chan T {
 
 	outs := make([]chan T, n)
 	for i := range outs {
-		outs[i] = make(chan T)
+		outs[i] = make(chan T, 1) // Buffer of 1 allows non-blocking sends during round-robin
+	}
+
+	// Handle nil input channel - close all outputs immediately
+	if in == nil {
+		for _, ch := range outs {
+			close(ch)
+		}
+		result := make([]<-chan T, n)
+		for i, ch := range outs {
+			result[i] = ch
+		}
+		return result
 	}
 
 	go func() {

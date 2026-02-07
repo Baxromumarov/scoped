@@ -41,6 +41,8 @@
 // # Channel Utilities
 //
 // The [github.com/baxromumarov/scoped/chanx] subpackage provides
-// context-aware channel operations (Send, Recv), fan-in/fan-out patterns
-// (Merge, Tee, FanOut), and an idempotent-close channel wrapper (Closable).
+// context-aware channel operations (Send, Recv, SendBatch, RecvBatch),
+// fan-in/fan-out patterns (Merge, Tee, FanOut), transformation pipelines
+// (Map, Filter), rate limiting (Throttle), batching (Buffer), racing
+// (First), and an idempotent-close channel wrapper (Closable).
 package scoped

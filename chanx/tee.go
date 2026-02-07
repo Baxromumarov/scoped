@@ -6,6 +6,8 @@ import "context"
 // All outputs receive every value. The output channels are closed when
 // in is closed or the context is cancelled.
 //
+// If in is nil, all output channels are closed immediately.
+//
 // Warning: if any consumer is slow, it blocks the broadcast to all others.
 // Use buffered consumers or [OrDone] to mitigate this.
 // Tee panics if n is not positive.
@@ -17,6 +19,18 @@ func Tee[T any](ctx context.Context, in <-chan T, n int) []<-chan T {
 	outs := make([]chan T, n)
 	for i := range outs {
 		outs[i] = make(chan T)
+	}
+
+	// Handle nil input channel, close all outputs immediately
+	if in == nil {
+		for _, ch := range outs {
+			close(ch)
+		}
+		result := make([]<-chan T, n)
+		for i, ch := range outs {
+			result[i] = ch
+		}
+		return result
 	}
 
 	go func() {

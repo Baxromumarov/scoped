@@ -15,7 +15,7 @@ import (
 	"github.com/baxromumarov/scoped"
 )
 
-// ---Chaos tests
+// Chaos tests
 
 func TestNestedTasks(t *testing.T) {
 	type task struct {
@@ -40,22 +40,22 @@ func TestNestedTasks(t *testing.T) {
 		scoped.WithPolicy(scoped.FailFast),
 	)
 
-	for _, t := range tasks {
-		t := t
+	for _, tk := range tasks {
+		tk := tk
 
-		s.Go(t.name, func(ctx context.Context) error {
-			if t.idx == 5 {
+		s.Go(tk.name, func(ctx context.Context) error {
+			if tk.idx == 5 {
 				panic("just test panic")
 			}
 
-			if t.idx%2 == 0 {
-				s.Go(fmt.Sprintf("%s-child", t.name), func(ctx context.Context) error {
+			if tk.idx%2 == 0 {
+				s.Go(fmt.Sprintf("%s-child", tk.name), func(ctx context.Context) error {
 					time.Sleep(10 * time.Millisecond)
 					return nil
 				})
 			}
 
-			if t.idx == 3 {
+			if tk.idx == 3 {
 				return errors.New("just test error")
 			}
 
@@ -64,13 +64,13 @@ func TestNestedTasks(t *testing.T) {
 
 	}
 
-	if err := s.Wait(); err != nil {
-		fmt.Printf("error is here: %v", err)
+	err := s.Wait()
+	if err == nil {
+		t.Fatal("expected error from panic or task failure, got nil")
 	}
 
 }
 
-// --- Run basics ---
 
 func TestRunAllSuccess(t *testing.T) {
 	var count atomic.Int32
@@ -133,8 +133,6 @@ func TestWithPolicyInvalidPanics(t *testing.T) {
 	}
 }
 
-// --- FailFast ---
-
 func TestRunFailFast(t *testing.T) {
 	sentinel := errors.New("task-3 failed")
 	err := scoped.Run(context.Background(), func(s *scoped.Scope) {
@@ -174,14 +172,13 @@ func TestRunFailFastCancelsOthers(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	// Give goroutines a moment to observe cancellation.
-	time.Sleep(10 * time.Millisecond)
+	// Run waits for all tasks, so cancelled count is already final.
 	if got := cancelled.Load(); got != 5 {
 		t.Fatalf("expected 5 workers cancelled, got %d", got)
 	}
 }
 
-// --- Collect ---
+
 
 func TestRunCollect(t *testing.T) {
 	err := scoped.Run(context.Background(), func(s *scoped.Scope) {
@@ -229,8 +226,6 @@ func TestRunCollectNoCancellation(t *testing.T) {
 		t.Fatalf("expected 3 workers completed, got %d", got)
 	}
 }
-
-// --- Panics ---
 
 func TestRunPanicReRaised(t *testing.T) {
 	defer func() {
@@ -296,8 +291,6 @@ func TestRunMultiplePanicsFirstReRaised(t *testing.T) {
 		}
 	})
 }
-
-// --- Bounded concurrency ---
 
 func TestRunLimit(t *testing.T) {
 	const limit = 3
@@ -373,8 +366,6 @@ func TestRunLimitContextCancel(t *testing.T) {
 	}
 }
 
-// --- External cancellation ---
-
 func TestRunExternalCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -397,8 +388,6 @@ func TestRunExternalCancel(t *testing.T) {
 		t.Fatal("task did not observe cancellation")
 	}
 }
-
-// --- Sub-tasks ---
 
 func TestRunSubTasks(t *testing.T) {
 	var count atomic.Int32
@@ -423,8 +412,6 @@ func TestRunSubTasks(t *testing.T) {
 	}
 }
 
-// --- Scope.Cancel ---
-
 func TestScopeCancel(t *testing.T) {
 	err := scoped.Run(context.Background(), func(s *scoped.Scope) {
 		s.Go("task", func(ctx context.Context) error {
@@ -442,8 +429,6 @@ func TestScopeCancel(t *testing.T) {
 	}
 }
 
-// --- Wait idempotent ---
-
 func TestWaitIdempotent(t *testing.T) {
 	s, _ := scoped.New(context.Background())
 	s.Go("task", func(ctx context.Context) error {
@@ -459,8 +444,6 @@ func TestWaitIdempotent(t *testing.T) {
 	}
 }
 
-// --- Go after closed ---
-
 func TestGoAfterClosedPanics(t *testing.T) {
 	defer func() {
 		r := recover()
@@ -473,8 +456,6 @@ func TestGoAfterClosedPanics(t *testing.T) {
 	_ = s.Wait()
 	s.Go("late", func(ctx context.Context) error { return nil })
 }
-
-// --- Context propagation ---
 
 func TestContextPropagation(t *testing.T) {
 	type key struct{}
@@ -491,8 +472,6 @@ func TestContextPropagation(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
-
-// --- Hooks ---
 
 func TestHooks(t *testing.T) {
 	var (
@@ -582,8 +561,6 @@ func TestHookPanicBehavior(t *testing.T) {
 	}
 }
 
-// --- GoResult ---
-
 func TestGoResult(t *testing.T) {
 	var r *scoped.Result[int]
 	err := scoped.Run(context.Background(), func(s *scoped.Scope) {
@@ -640,8 +617,6 @@ func TestGoResultContextCancel(t *testing.T) {
 	}
 }
 
-// --- ForEach ---
-
 func TestForEach(t *testing.T) {
 	items := []int{1, 2, 3, 4, 5}
 	var sum atomic.Int64
@@ -669,8 +644,6 @@ func TestForEachError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
-
-// --- Map ---
 
 func TestMap(t *testing.T) {
 	items := []int{1, 2, 3, 4, 5}
@@ -700,8 +673,6 @@ func TestMapError(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
-
-// --- Stress test ---
 
 func TestRunStress(t *testing.T) {
 	if testing.Short() {

@@ -144,8 +144,12 @@ func (s *Scope) Go(name string, fn func(ctx context.Context) error) {
 			case s.sem <- struct{}{}:
 				defer func() { <-s.sem }()
 			case <-s.ctx.Done():
-				// Context canceled while waiting for a slot.
-				// Don't report this as a task error.
+				// Context canceled while waiting for a slot;
+				// report the context error so the task isn't silently dropped.
+				if s.cfg.onDone != nil {
+					s.cfg.onDone(info, s.ctx.Err(), 0)
+				}
+				s.recordError(s.ctx.Err())
 				return
 			}
 		}

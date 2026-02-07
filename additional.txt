@@ -1,0 +1,24 @@
+1. // SendBatch sends multiple values, stopping on first error
+func SendBatch[T any](<ctx context.Context, ch chan<- T, values []T>) error
+// RecvBatch receives up to n values
+func RecvBatch[T any](<ctx context.Context, ch <-chan T, n int>) ([]T, error)
+2. Transform/Map Pipeline
+go
+// Map transforms values using a function
+func Map[T, U any](<ctx context.Context, in <-chan T, fn func(T>) U) <-chan U
+3. Filter Pipeline
+go
+// Filter passes only values that match predicate
+func Filter[T any](<ctx context.Context, in <-chan T, fn func(T>) bool) <-chan T
+4. Rate Limiting
+go
+// Throttle limits throughput to n items per duration
+func Throttle[T any](<ctx context.Context, in <-chan T, n int, per time.Duration>) <-chan T
+5. Buffer/Batch Channel
+go
+// Buffer collects items into batches of size n or after timeout
+func Buffer[T any](<ctx context.Context, in <-chan T, size int, timeout time.Duration>) <-chan []T
+6. Select Helpers
+go
+// First returns a channel that receives from whichever channel yields first
+func First[T any](<ctx context.Context, chs ...<-chan T>) <-chan T

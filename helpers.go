@@ -10,7 +10,7 @@ import (
 //
 // This is a convenience wrapper around [Run] and [Scope.Go].
 //
-//	err := scoped.ForEach(ctx, urls, func(ctx context.Context, u string) error {
+//	err := scoped.ForEach(ctx, URLs, func(ctx context.Context, u string) error {
 //	    return fetch(ctx, u)
 //	}, scoped.WithLimit(10))
 func ForEach[T any](ctx context.Context, items []T, fn func(ctx context.Context, item T) error, opts ...Option) error {

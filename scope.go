@@ -50,8 +50,8 @@ type Scope struct {
 }
 
 // New creates a new Scope with the given parent context and options.
-// The returned context is a child of parent and is cancelled when the
-// scope finishes or is explicitly cancelled.
+// The returned context is a child of parent and is canceled when the
+// scope finishes or is explicitly canceled.
 //
 // The caller MUST call [Scope.Wait] when done spawning tasks.
 // Prefer [Run] for automatic lifecycle management.
@@ -114,7 +114,7 @@ func Run(parent context.Context, fn func(s *Scope), opts ...Option) (err error) 
 			panic(waitPanic)
 		}
 
-		err = waitErr 
+		err = waitErr
 	}()
 
 	fn(s)
@@ -122,7 +122,7 @@ func Run(parent context.Context, fn func(s *Scope), opts ...Option) (err error) 
 }
 
 // Go spawns a named task in the scope. The task function receives the
-// scope's context, which is cancelled when the scope shuts down.
+// scope's context, which is canceled when the scope shuts down.
 //
 // Tasks may spawn additional sibling tasks by calling Go on the same scope.
 //
@@ -144,7 +144,7 @@ func (s *Scope) Go(name string, fn func(ctx context.Context) error) {
 			case s.sem <- struct{}{}:
 				defer func() { <-s.sem }()
 			case <-s.ctx.Done():
-				// Context cancelled while waiting for a slot.
+				// Context canceled while waiting for a slot.
 				// Don't report this as a task error.
 				return
 			}
@@ -212,7 +212,7 @@ func (s *Scope) Wait() error {
 	return s.waitErr
 }
 
-// Context returns the scope's context. It is cancelled when the scope
+// Context returns the scope's context. It is canceled when the scope
 // finishes or when [Scope.Cancel] is called.
 func (s *Scope) Context() context.Context {
 	return s.ctx

@@ -7,7 +7,7 @@ import (
 
 // Merge combines multiple input channels into a single output channel
 // (fan-in). The output channel is closed when all inputs are closed or
-// the context is cancelled. The order of values is non-deterministic.
+// the context is canceled. The order of values is non-deterministic.
 //
 // Every internal goroutine is tied to ctx and will exit promptly on
 // cancellation.
@@ -48,7 +48,7 @@ func Merge[T any](ctx context.Context, chs ...<-chan T) <-chan T {
 
 // FanOut distributes values from in across n output channels in
 // round-robin order. Each output channel is closed when in is closed
-// or the context is cancelled.
+// or the context is canceled.
 //
 // This is useful for distributing work to a fixed set of workers.
 // FanOut panics if n is not positive.

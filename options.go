@@ -53,7 +53,7 @@ func WithPolicy(p Policy) Option {
 
 // WithLimit sets the maximum number of goroutines that can execute
 // concurrently within the scope. Tasks beyond the limit block until
-// a slot becomes available or the context is cancelled.
+// a slot becomes available or the context is canceled.
 //
 // A limit of zero (the default) means unlimited concurrency.
 // WithLimit panics if n is negative.

@@ -29,8 +29,7 @@ func (e *PanicError) Error() string {
 func (e *PanicError) Unwrap() error { return nil }
 
 func newPanicError(v any) *PanicError {
-	// 8 KiB is enough for most stack traces. runtime.Stack truncates
-	// gracefully if the buffer is too small.
+
 	buf := make([]byte, 8192)
 	n := runtime.Stack(buf, false)
 	return &PanicError{

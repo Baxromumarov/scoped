@@ -4,7 +4,7 @@ import "context"
 
 // OrDone wraps a receive channel so that it respects context cancellation.
 // The returned channel yields values from in until in is closed or ctx
-// is cancelled, whichever comes first.
+// is canceled, whichever comes first.
 //
 // The internal goroutine exits promptly on cancellation, preventing leaks.
 func OrDone[T any](ctx context.Context, in <-chan T) <-chan T {

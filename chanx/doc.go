@@ -17,5 +17,5 @@
 //     send-on-closed panics to errors.
 //
 // All functions that spawn goroutines tie them to a [context.Context],
-// ensuring they terminate when the context is cancelled.
+// ensuring they terminate when the context is canceled.
 package chanx

@@ -18,7 +18,6 @@ type Result[T any] struct {
 //	r := scoped.GoResult(s, "compute", func(ctx context.Context) (int, error) {
 //	    return expensiveCalc(ctx)
 //	})
-//	// ... later, after scope tasks have run ...
 //	val, err := r.Wait()
 func GoResult[T any](
 	s *Scope,
@@ -39,10 +38,10 @@ func GoResult[T any](
 	return r
 }
 
-// Wait blocks until the task completes or the scope's context is cancelled.
+// Wait blocks until the task completes or the scope's context is canceled.
 // It returns the task's value and error.
 //
-// If the scope's context is cancelled before the task completes, Wait
+// If the scope's context is canceled before the task completes, Wait
 // returns the zero value and the context error.
 func (r *Result[T]) Wait() (T, error) {
 	select {

@@ -5,19 +5,11 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="e0d7732d-856b-4d46-b674-b769a6c96484" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/chanx/closable_test.go" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/cmd/main.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/chanx/chanx.go" beforeDir="false" afterPath="$PROJECT_DIR$/chanx/chanx.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chanx/chanx_test.go" beforeDir="false" />
       <change beforePath="$PROJECT_DIR$/chanx/closable.go" beforeDir="false" afterPath="$PROJECT_DIR$/chanx/closable.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/chanx/doc.go" beforeDir="false" afterPath="$PROJECT_DIR$/chanx/doc.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/chanx/drain.go" beforeDir="false" afterPath="$PROJECT_DIR$/chanx/drain.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/chanx/merge.go" beforeDir="false" afterPath="$PROJECT_DIR$/chanx/merge.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/go.mod" beforeDir="false" afterPath="$PROJECT_DIR$/go.mod" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/helpers.go" beforeDir="false" afterPath="$PROJECT_DIR$/helpers.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/options.go" beforeDir="false" afterPath="$PROJECT_DIR$/options.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/panic.go" beforeDir="false" afterPath="$PROJECT_DIR$/panic.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/result.go" beforeDir="false" afterPath="$PROJECT_DIR$/result.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scope.go" beforeDir="false" afterPath="$PROJECT_DIR$/scope.go" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/chanx/closable_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/chanx/closable_test.go" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -31,6 +23,7 @@
   </component>
   <component name="CopilotUserSelectedModel">
     <selectedModels>
+      <entry key="edit-panel" value="Claude Opus 4.5" />
       <entry key="chat-panel" value="Claude Opus 4.5" />
       <entry key="agent-panel" value="Claude Opus 4.5" />
     </selectedModels>
@@ -72,8 +65,18 @@
   "keyToString": {
     "DefaultGoTemplateProperty": "Go File",
     "Go Test.TestClosable_Send in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestClosable_SendAfterClose in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestClosable_SendBlocksWhenFull in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestClosable_SendConcurrent in github.com/baxromumarov/scoped/chanx.executor": "Run",
     "Go Test.TestClosable_TrySend in github.com/baxromumarov/scoped/chanx.executor": "Run",
     "Go Test.TestClosable_TrySendWithClose in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestMerge_NoChannels in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestSend in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestSend_ClosedChannel in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestSend_ContextCanceled in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestSend_ContextDeadlineExceeded in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestSend_Success in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.go test github.com/baxromumarov/scoped/chanx.executor": "Run",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.GoLinterPluginOnboardingV2": "true",
     "RunOnceActivity.GoLinterPluginStorageMigration": "true",
@@ -95,7 +98,7 @@
     "to.speed.mode.migration.done": "true"
   }
 }]]></component>
-  <component name="RunManager" selected="Go Test.TestClosable_Send in github.com/baxromumarov/scoped/chanx">
+  <component name="RunManager" selected="Go Test.TestClosable_SendConcurrent in github.com/baxromumarov/scoped/chanx">
     <configuration name="TestClosable_Send in github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
       <module name="scoped" />
       <working_directory value="$PROJECT_DIR$/chanx" />
@@ -108,7 +111,7 @@
       <pattern value="^\QTestClosable_Send\E$" />
       <method v="2" />
     </configuration>
-    <configuration name="TestClosable_TrySend in github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+    <configuration name="TestClosable_SendAfterClose in github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
       <module name="scoped" />
       <working_directory value="$PROJECT_DIR$/chanx" />
       <root_directory value="$PROJECT_DIR$" />
@@ -117,10 +120,10 @@
       <directory value="$PROJECT_DIR$" />
       <filePath value="$PROJECT_DIR$" />
       <framework value="gotest" />
-      <pattern value="^\QTestClosable_TrySend\E$" />
+      <pattern value="^\QTestClosable_SendAfterClose\E$" />
       <method v="2" />
     </configuration>
-    <configuration name="TestClosable_TrySendWithClose in github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+    <configuration name="TestClosable_SendBlocksWhenFull in github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
       <module name="scoped" />
       <working_directory value="$PROJECT_DIR$/chanx" />
       <root_directory value="$PROJECT_DIR$" />
@@ -129,14 +132,39 @@
       <directory value="$PROJECT_DIR$" />
       <filePath value="$PROJECT_DIR$" />
       <framework value="gotest" />
-      <pattern value="^\QTestClosable_TrySendWithClose\E$" />
+      <pattern value="^\QTestClosable_SendBlocksWhenFull\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="TestClosable_SendConcurrent in github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="scoped" />
+      <working_directory value="$PROJECT_DIR$/chanx" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/baxromumarov/scoped/chanx" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <pattern value="^\QTestClosable_SendConcurrent\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="go test github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="scoped" />
+      <working_directory value="$PROJECT_DIR$/chanx" />
+      <root_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/baxromumarov/scoped/chanx" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
       <method v="2" />
     </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Go Test.TestClosable_SendConcurrent in github.com/baxromumarov/scoped/chanx" />
+        <item itemvalue="Go Test.TestClosable_SendBlocksWhenFull in github.com/baxromumarov/scoped/chanx" />
+        <item itemvalue="Go Test.TestClosable_SendAfterClose in github.com/baxromumarov/scoped/chanx" />
         <item itemvalue="Go Test.TestClosable_Send in github.com/baxromumarov/scoped/chanx" />
-        <item itemvalue="Go Test.TestClosable_TrySendWithClose in github.com/baxromumarov/scoped/chanx" />
-        <item itemvalue="Go Test.TestClosable_TrySend in github.com/baxromumarov/scoped/chanx" />
+        <item itemvalue="Go Test.go test github.com/baxromumarov/scoped/chanx" />
       </list>
     </recent_temporary>
   </component>

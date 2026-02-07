@@ -13,14 +13,7 @@ func Send[T any](ctx context.Context, ch chan<- T, v T) error {
 	}
 }
 
-func isClosed[T any](ch <-chan T) bool {
-	select {
-	case <-ch:
-		return true
-	default:
-		return false
-	}
-}
+
 
 // Recv receives a value from ch, unblocking early if ctx is canceled.
 // It returns the value, a boolean indicating whether the channel is still

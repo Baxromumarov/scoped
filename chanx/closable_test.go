@@ -213,9 +213,16 @@ func TestClosable_Close(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, 42, val)
 
-	// Channel should be closed now
-	_, ok = <-c.Chan()
-	assert.False(t, ok)
+	// Done channel should be closed
+	select {
+	case <-c.Done():
+		// Expected
+	default:
+		t.Fatal("Done channel should be closed after Close()")
+	}
+
+	// IsClosed should return true
+	assert.True(t, c.IsClosed())
 }
 
 func TestClosable_CloseIdempotent(t *testing.T) {
@@ -226,13 +233,12 @@ func TestClosable_CloseIdempotent(t *testing.T) {
 	c.Close()
 	c.Close()
 
-	// Channel should be closed
-	_, ok := <-c.Chan()
+	// Done channel should be closed
+	_, ok := <-c.Done()
 	assert.False(t, ok)
 
-	// Done channel should also be closed
-	_, ok = <-c.Done()
-	assert.False(t, ok)
+	// IsClosed should return true
+	assert.True(t, c.IsClosed())
 }
 
 func TestClosable_CloseConcurrent(t *testing.T) {
@@ -251,13 +257,12 @@ func TestClosable_CloseConcurrent(t *testing.T) {
 
 	wg.Wait()
 
-	// Channel should be closed
-	_, ok := <-c.Chan()
+	// Done channel should be closed
+	_, ok := <-c.Done()
 	assert.False(t, ok)
 
-	// Done channel should be closed
-	_, ok = <-c.Done()
-	assert.False(t, ok)
+	// IsClosed should return true
+	assert.True(t, c.IsClosed())
 }
 
 func TestClosable_Chan(t *testing.T) {
@@ -272,10 +277,14 @@ func TestClosable_Chan(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, 42, val)
 
-	// Close and verify Chan() is closed
+	// Close and verify Done() is closed (Chan() remains open)
 	c.Close()
-	_, ok = <-c.Chan()
-	assert.False(t, ok)
+	select {
+	case <-c.Done():
+		// Expected
+	default:
+		t.Fatal("Done channel should be closed after Close()")
+	}
 }
 
 func TestClosable_Done(t *testing.T) {
@@ -460,12 +469,8 @@ func TestClosable_RaceConditions(t *testing.T) {
 
 		wg.Wait()
 
-		// Drain any successfully sent messages and verify channel closes
-		for range c.Chan() {
-			// drain
-		}
-
-		// After draining, confirm Done() is closed
+		// Verify Close() was called - no need to drain since Chan() never closes
+		assert.True(t, c.IsClosed())
 		select {
 		case <-c.Done():
 			// Expected - channel is closed
@@ -498,12 +503,8 @@ func TestClosable_RaceConditions(t *testing.T) {
 
 		wg.Wait()
 
-		// Drain any successfully sent messages and verify channel closes
-		for range c.Chan() {
-			// drain
-		}
-
-		// After draining, confirm Done() is closed
+		// Verify Close() was called - no need to drain since Chan() never closes
+		assert.True(t, c.IsClosed())
 		select {
 		case <-c.Done():
 			// Expected - channel is closed
@@ -528,8 +529,8 @@ func TestClosable_RaceConditions(t *testing.T) {
 
 		wg.Wait()
 
-		// Channel should be closed
-		_, ok := <-c.Chan()
+		// Done channel should be closed
+		_, ok := <-c.Done()
 		assert.False(t, ok)
 	})
 }
@@ -583,12 +584,8 @@ func TestClosable_SendCloseRaceNoLostMessages(t *testing.T) {
 	// Close the channel
 	c.Close()
 
-	// Verify all sent values are still readable
-	received := 0
-	for range c.Chan() {
-		received++
-	}
-	assert.Equal(t, 50, received)
+	// Verify all sent values are still buffered (we sent 50 to a capacity 100 channel)
+	assert.Equal(t, 50, c.Len())
 }
 
 // Benchmarks for performance validation

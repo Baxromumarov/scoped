@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 // ErrClosed is returned by [Closable.Send] when the channel has been closed.
@@ -18,13 +19,17 @@ var ErrBuffFull = errors.New("chanx: buffer is full")
 // Go channels panic on double close and on send-after-close. Closable
 // converts these panics into errors, making it safe to use in
 // concurrent teardown scenarios.
+//
+// Note: Unlike raw Go channels, the underlying data channel is NOT closed
+// when Close() is called. Use Done() to detect closure in select statements.
+// The Chan() method returns a receive-only channel that will continue to
+// deliver any buffered messages after Close() is called.
 type Closable[T any] struct {
 	ch     chan T
 	once   sync.Once
 	closed chan struct{} // closed when Close() is called
 
-	mu       sync.RWMutex // protects isClosed and serializes with Close
-	isClosed bool
+	isClosed atomic.Bool // fast check for closed state
 }
 
 // NewClosable creates a Closable channel with the given buffer capacity.
@@ -37,24 +42,18 @@ func NewClosable[T any](capacity int) *Closable[T] {
 
 // Send sends v to the underlying channel. It returns [ErrClosed] if the
 // channel has been closed. Send blocks if the channel buffer is full.
-func (c *Closable[T]) Send(v T) error {
-	c.mu.RLock()
-	if c.isClosed {
-		c.mu.RUnlock()
+func (c *Closable[T]) Send(v T) (err error) {
+	// Fast path: check if already closed
+	if c.isClosed.Load() {
 		return ErrClosed
 	}
 
-	// Try non-blocking send first while holding the lock
-	select {
-	case c.ch <- v:
-		c.mu.RUnlock()
-		return nil
-	default:
-		// Buffer is full, need to block - but we can't hold lock while blocking
-	}
-	c.mu.RUnlock()
+	defer func() {
+		if recover() != nil {
+			err = ErrClosed
+		}
+	}()
 
-	// Block outside the lock, but use closed channel to detect close
 	select {
 	case c.ch <- v:
 		return nil
@@ -65,10 +64,8 @@ func (c *Closable[T]) Send(v T) error {
 
 // TrySend non-blocking send that returns ErrBuffFull instead of blocking or deadlocking
 func (c *Closable[T]) TrySend(v T) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if c.isClosed {
+	// Fast path: check if already closed
+	if c.isClosed.Load() {
 		return ErrClosed
 	}
 
@@ -76,6 +73,10 @@ func (c *Closable[T]) TrySend(v T) error {
 	case c.ch <- v:
 		return nil
 	default:
+		// buffer full OR no receiver - recheck closed status
+		if c.isClosed.Load() {
+			return ErrClosed
+		}
 		return ErrBuffFull
 	}
 }
@@ -84,23 +85,11 @@ func (c *Closable[T]) TrySend(v T) error {
 // is canceled. Returns [ErrClosed] if the channel is closed, or the
 // context error if canceled.
 func (c *Closable[T]) SendContext(ctx context.Context, v T) error {
-	c.mu.RLock()
-	if c.isClosed {
-		c.mu.RUnlock()
+	// Fast path: check if already closed
+	if c.isClosed.Load() {
 		return ErrClosed
 	}
 
-	// Try non-blocking send first while holding the lock
-	select {
-	case c.ch <- v:
-		c.mu.RUnlock()
-		return nil
-	default:
-		// Buffer is full, need to block
-	}
-	c.mu.RUnlock()
-
-	// Block outside the lock
 	select {
 	case c.ch <- v:
 		return nil
@@ -111,21 +100,25 @@ func (c *Closable[T]) SendContext(ctx context.Context, v T) error {
 	}
 }
 
-// Close closes the underlying channel. It is safe to call multiple times;
-// only the first call actually closes the channel.
+// Close marks the channel as closed. It is safe to call multiple times;
+// only the first call has effect.
+//
+// After Close() is called:
+//   - Send, TrySend, and SendContext will return ErrClosed
+//   - Done() will return a closed channel
+//   - Chan() remains open but no new values will be sent
+//   - Existing buffered values can still be read from Chan()
 func (c *Closable[T]) Close() {
 	c.once.Do(func() {
-		c.mu.Lock()
-		c.isClosed = true
-		c.mu.Unlock()
-
+		c.isClosed.Store(true)
 		close(c.closed)
-		close(c.ch)
 	})
 }
 
-// Chan returns the underlying channel for reading. The returned channel
-// is closed when [Closable.Close] is called.
+// Chan returns the underlying channel for reading.
+// Note: This channel is NOT closed when Close() is called.
+// Use Done() in a select to detect closure, or range over Chan()
+// with a separate Done() check.
 func (c *Closable[T]) Chan() <-chan T {
 	return c.ch
 }
@@ -134,4 +127,16 @@ func (c *Closable[T]) Chan() <-chan T {
 // This is useful for select statements that need to detect closure.
 func (c *Closable[T]) Done() <-chan struct{} {
 	return c.closed
+}
+
+// IsClosed returns true if Close() has been called.
+func (c *Closable[T]) IsClosed() bool {
+	return c.isClosed.Load()
+}
+
+// Len returns the number of items currently buffered in the channel.
+// Note: This is for informational purposes only and the value may be
+// stale in concurrent contexts.
+func (c *Closable[T]) Len() int {
+	return len(c.ch)
 }

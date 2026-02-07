@@ -15,6 +15,61 @@ import (
 	"github.com/baxromumarov/scoped"
 )
 
+// ---Chaos tests
+
+func TestNestedTasks(t *testing.T) {
+	type task struct {
+		name string
+		idx  int
+	}
+
+	var tasks = []task{
+		{name: "a", idx: 1},
+		{name: "b", idx: 2},
+		{name: "c", idx: 3},
+		{name: "d", idx: 4},
+		{name: "e", idx: 5},
+		{name: "f", idx: 6},
+		{name: "g", idx: 7},
+		{name: "h", idx: 8},
+	}
+
+	s, _ := scoped.New(
+		context.Background(),
+		scoped.WithPanicAsError(),
+		scoped.WithPolicy(scoped.FailFast),
+	)
+
+	for _, t := range tasks {
+		t := t
+
+		s.Go(t.name, func(ctx context.Context) error {
+			if t.idx == 5 {
+				panic("just test panic")
+			}
+
+			if t.idx%2 == 0 {
+				s.Go(fmt.Sprintf("%s-child", t.name), func(ctx context.Context) error {
+					time.Sleep(10 * time.Millisecond)
+					return nil
+				})
+			}
+
+			if t.idx == 3 {
+				return errors.New("just test error")
+			}
+
+			return nil
+		})
+
+	}
+
+	if err := s.Wait(); err != nil {
+		fmt.Printf("error is here: %v", err)
+	}
+
+}
+
 // --- Run basics ---
 
 func TestRunAllSuccess(t *testing.T) {

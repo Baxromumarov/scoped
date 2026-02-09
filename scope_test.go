@@ -71,7 +71,6 @@ func TestNestedTasks(t *testing.T) {
 
 }
 
-
 func TestRunAllSuccess(t *testing.T) {
 	var count atomic.Int32
 	err := scoped.Run(context.Background(), func(s *scoped.Scope) {
@@ -177,8 +176,6 @@ func TestRunFailFastCancelsOthers(t *testing.T) {
 		t.Fatalf("expected 5 workers cancelled, got %d", got)
 	}
 }
-
-
 
 func TestRunCollect(t *testing.T) {
 	err := scoped.Run(context.Background(), func(s *scoped.Scope) {
@@ -617,10 +614,40 @@ func TestGoResultContextCancel(t *testing.T) {
 	}
 }
 
+func TestGoResultPanic(t *testing.T) {
+	var r *scoped.Result[int]
+	err := scoped.Run(
+		context.Background(),
+		func(s *scoped.Scope) {
+			r = scoped.GoResult(
+				s,
+				"compute",
+				func(ctx context.Context) (int, error) {
+					panic("boom")
+				},
+			)
+		},
+		scoped.WithPanicAsError(),
+	)
+
+	if err == nil {
+		t.Fatal("expected error from panic")
+	}
+	var pe *scoped.PanicError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected PanicError, got %T: %v", err, err)
+	}
+
+	_, rerr := r.Wait()
+	if !errors.As(rerr, &pe) {
+		t.Fatalf("expected PanicError from result, got %T: %v", rerr, rerr)
+	}
+}
+
 func TestForEach(t *testing.T) {
 	items := []int{1, 2, 3, 4, 5}
 	var sum atomic.Int64
-	err := scoped.ForEach(context.Background(), items, func(ctx context.Context, item int) error {
+	err := scoped.ForEachSlice(context.Background(), items, func(ctx context.Context, item int) error {
 		sum.Add(int64(item))
 		return nil
 	}, scoped.WithLimit(2))
@@ -634,7 +661,7 @@ func TestForEach(t *testing.T) {
 
 func TestForEachError(t *testing.T) {
 	items := []int{1, 2, 3}
-	err := scoped.ForEach(context.Background(), items, func(ctx context.Context, item int) error {
+	err := scoped.ForEachSlice(context.Background(), items, func(ctx context.Context, item int) error {
 		if item == 2 {
 			return errors.New("bad item")
 		}
@@ -647,7 +674,7 @@ func TestForEachError(t *testing.T) {
 
 func TestMap(t *testing.T) {
 	items := []int{1, 2, 3, 4, 5}
-	results, err := scoped.Map(context.Background(), items, func(ctx context.Context, item int) (int, error) {
+	results, err := scoped.MapSlice(context.Background(), items, func(ctx context.Context, item int) (int, error) {
 		return item * 2, nil
 	}, scoped.WithLimit(3))
 	if err != nil {
@@ -663,7 +690,7 @@ func TestMap(t *testing.T) {
 
 func TestMapError(t *testing.T) {
 	items := []int{1, 2, 3}
-	_, err := scoped.Map(context.Background(), items, func(ctx context.Context, item int) (int, error) {
+	_, err := scoped.MapSlice(context.Background(), items, func(ctx context.Context, item int) (int, error) {
 		if item == 2 {
 			return 0, errors.New("bad")
 		}

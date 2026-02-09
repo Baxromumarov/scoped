@@ -30,6 +30,12 @@ func GoResult[T any](
 	}
 	s.Go(name, func(ctx context.Context) error {
 		defer close(r.done)
+		defer func() {
+			if rec := recover(); rec != nil {
+				r.err = newPanicError(rec)
+				panic(rec) // re-panic for Scope to handle
+			}
+		}()
 		v, err := fn(ctx)
 		r.val = v
 		r.err = err

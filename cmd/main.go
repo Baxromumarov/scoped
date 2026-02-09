@@ -3,28 +3,129 @@ package main
 import (
 	"context"
 	"fmt"
-	"strconv"
+	"time"
 
-	"github.com/baxromumarov/scoped/chanx"
+	"github.com/baxromumarov/scoped"
 )
 
-func main() {
-	ch := make(chan int, 5)
-	for i := 0; i < 5; i++ {
-		ch <- i
-	}
-	close(ch)
-
-	out := chanx.Map(
-		context.Background(),
-		ch,
-		strconv.Itoa,
-	)
-
-	for v := range out {
-		fmt.Println(v)
+func w1(ctx context.Context) error {
+	select {
+	case <-time.After(1 * time.Second):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
+
+func w2(ctx context.Context) error {
+	select {
+	case <-time.After(1 * time.Second):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func w3(ctx context.Context) error {
+	return fmt.Errorf("w3 failed")
+}
+
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	arr := []func(context.Context) error{w3, w1, w2}
+
+	now := time.Now()
+
+	for idx, f := range arr {
+		f := f
+		err := scoped.Run(
+			ctx,
+			func(s *scoped.Scope) {
+				s.Go(
+					fmt.Sprintf("%d index", idx),
+					func(ctx context.Context) error {
+						return f(ctx)
+					},
+				)
+			},
+			scoped.WithPanicAsError(),
+			/*
+				TODO: when policy is failfast it is not working, it should return error immediately
+				but it is running other task and returning this error in current case:
+					Error from worker 0: w3 failed
+					Error from worker 1: context deadline exceeded
+					Error from worker 2: context deadline exceeded
+					Elapsed time:  0.050548618
+			*/
+			scoped.WithPolicy(scoped.FailFast),
+		)
+		if err != nil {
+			fmt.Printf("Error from worker %d: %v\n", idx, err)
+		}
+	}
+
+	fmt.Println("Elapsed time: ", time.Since(now).Seconds())
+}
+
+// func main() {
+// 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+// 	defer cancel()
+
+// 	arr := []func(context.Context) error{w3, w1, w2, w3}
+
+// 	now := time.Now()
+
+// 	scope, ctx := scoped.New(ctx, scoped.WithPanicAsError())
+
+// 	for idx, f := range arr {
+// 		f := f
+// 		scope.Go(
+// 			fmt.Sprintf("worker: %d", idx),
+// 			func(ctx context.Context) error {
+// 				return f(ctx)
+// 			},
+// 		)
+// 	}
+
+// 	if err := scope.Wait(); err != nil {
+// 		fmt.Println(err)
+// 	}
+
+// 	fmt.Println("Elapsed time: ", time.Since(now).Seconds())
+// }
+
+// func main() {
+// 	arr := []func() error{w1, w2, w3}
+
+// 	now := time.Now()
+// 	for _, f := range arr {
+// 		if err := f(); err != nil {
+// 			fmt.Println(">>>>>>> ", err)
+// 		}
+// 	}
+
+// 	fmt.Println("Elapsed time: ", time.Since(now).Seconds())
+// }
+
+// func main() {
+// 	ch := make(chan int, 5)
+// 	for i := 0; i < 5; i++ {
+// 		ch <- i
+// 	}
+// 	close(ch)
+
+// 	out := chanx.Map(
+// 		context.Background(),
+// 		ch,
+// 		strconv.Itoa,
+// 	)
+
+// 	for v := range out {
+// 		fmt.Println(v)
+// 	}
+// }
 
 // func main() {
 // 	ch := make(chan int, 5)

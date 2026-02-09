@@ -184,6 +184,7 @@ func (s *Scope) Go(name string, fn func(ctx context.Context) error) {
 //
 // Wait is safe to call multiple times; subsequent calls return the
 // cached result. If panics need re-raising, they are raised on every call.
+// When error happens first error will be returned
 func (s *Scope) Wait() error {
 	s.waitOnce.Do(func() {
 		s.state.Store(stateClosing)

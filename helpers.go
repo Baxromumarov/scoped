@@ -5,15 +5,15 @@ import (
 	"fmt"
 )
 
-// ForEach executes fn for each item in the slice concurrently,
+// ForEachSlice executes fn for each item in the slice concurrently,
 // using the provided options to control concurrency and error policy.
 //
 // This is a convenience wrapper around [Run] and [Scope.Go].
 //
-//	err := scoped.ForEach(ctx, URLs, func(ctx context.Context, u string) error {
+//	err := scoped.ForEachSlice(ctx, URLs, func(ctx context.Context, u string) error {
 //	    return fetch(ctx, u)
 //	}, scoped.WithLimit(10))
-func ForEach[T any](
+func ForEachSlice[T any](
 	ctx context.Context,
 	items []T,
 	fn func(ctx context.Context, item T) error,
@@ -36,17 +36,17 @@ func ForEach[T any](
 	)
 }
 
-// Map executes fn for each item concurrently and collects the results
+// MapSlice executes fn for each item concurrently and collects the results
 // in the same order as the input slice. It uses [FailFast] policy by
 // default; pass [WithPolicy]([Collect]) to gather partial results.
 //
-// On error, Map returns nil and the error. On success, it returns the
+// On error, MapSlice returns nil and the error. On success, it returns the
 // results slice and nil.
 //
-//	prices, err := scoped.Map(ctx, products, func(ctx context.Context, p Product) (float64, error) {
+//	prices, err := scoped.MapSlice(ctx, products, func(ctx context.Context, p Product) (float64, error) {
 //	    return fetchPrice(ctx, p)
 //	}, scoped.WithLimit(5))
-func Map[T, R any](
+func MapSlice[T, R any](
 	ctx context.Context,
 	items []T,
 	fn func(ctx context.Context, item T) (R, error),

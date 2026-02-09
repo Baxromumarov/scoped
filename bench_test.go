@@ -84,7 +84,7 @@ func BenchmarkGoResult(b *testing.B) {
 	}
 }
 
-// BenchmarkForEach measures ForEach helper overhead.
+// BenchmarkForEach measures ForEachSlice helper overhead.
 func BenchmarkForEach(b *testing.B) {
 	items := make([]int, 100)
 	for i := range items {
@@ -93,13 +93,13 @@ func BenchmarkForEach(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = scoped.ForEach(context.Background(), items, func(ctx context.Context, item int) error {
+		_ = scoped.ForEachSlice(context.Background(), items, func(ctx context.Context, item int) error {
 			return nil
 		}, scoped.WithLimit(10))
 	}
 }
 
-// BenchmarkMap measures Map helper overhead.
+// BenchmarkMap measures MapSlice helper overhead.
 func BenchmarkMap(b *testing.B) {
 	items := make([]int, 100)
 	for i := range items {
@@ -108,7 +108,7 @@ func BenchmarkMap(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = scoped.Map(context.Background(), items, func(ctx context.Context, item int) (int, error) {
+		_, _ = scoped.MapSlice(context.Background(), items, func(ctx context.Context, item int) (int, error) {
 			return item * 2, nil
 		}, scoped.WithLimit(10))
 	}

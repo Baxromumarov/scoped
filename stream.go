@@ -1,4 +1,4 @@
-//! Stream functionality isn't ready for production use.
+// ! Stream functionality isn't ready for production use.
 package scoped
 
 import (
@@ -187,7 +187,7 @@ func Batch[T any](s *Stream[T], n int) *Stream[[]T] {
 // ParallelMap transforms a stream concurrently.
 func ParallelMap[A, B any](
 	ctx context.Context,
-	s *Scope,
+	sp Spawner,
 	src *Stream[A],
 	opts StreamOptions,
 	fn func(context.Context, A) (B, error),
@@ -200,7 +200,7 @@ func ParallelMap[A, B any](
 	out := &Stream[B]{}
 	out.next = makeParallelNext(out, opts, resCh)
 
-	s.Go("parallel-map-dispatcher", func(ctx context.Context) error {
+	sp.Go("parallel-map-dispatcher", func(ctx context.Context, sp Spawner) error {
 		defer close(resCh)
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, opts.MaxWorkers)
@@ -224,7 +224,7 @@ func ParallelMap[A, B any](
 				return ctx.Err()
 			}
 
-			s.Go("parallel-map-worker", func(ctx context.Context) error {
+			sp.Go("parallel-map-worker", func(ctx context.Context, _ Spawner) error {
 				defer func() { <-sem; wg.Done() }()
 				res, err := fn(ctx, val)
 				select {
@@ -394,10 +394,10 @@ func (s *Stream[T]) ToChan(ctx context.Context) (<-chan T, <-chan error) {
 // ToChanScope sends all items in the stream to a channel within a Scope.
 // The goroutine is managed by the scope and will stop when the stream is exhausted
 // or the scope is canceled.
-func (s *Stream[T]) ToChanScope(scope *Scope) (<-chan T, <-chan error) {
+func (s *Stream[T]) ToChanScope(sp Spawner) (<-chan T, <-chan error) {
 	ch := make(chan T)
 	errCh := make(chan error, 1)
-	scope.Go("stream-to-chan", func(ctx context.Context) error {
+	sp.Go("stream-to-chan", func(ctx context.Context, _ Spawner) error {
 		defer close(ch)
 		defer close(errCh)
 		for {

@@ -40,18 +40,18 @@ func main() {
 
 	err := scoped.Run(
 		ctx,
-		func(s *scoped.Scope) {
+		func(sp scoped.Spawner) {
 			for idx, f := range arr {
 				f := f
-				s.Go(
+				sp.Go(
 					fmt.Sprintf("%d index", idx),
-					func(ctx context.Context) error {
+					func(ctx context.Context, _ scoped.Spawner) error {
 						return f(ctx)
 					},
 				)
 			}
 		},
-		scoped.WithPolicy(scoped.Collect),
+		scoped.WithPolicy(scoped.FailFast),
 		scoped.WithPanicAsError(),
 	)
 

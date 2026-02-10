@@ -16,9 +16,9 @@ func BenchmarkRunNoWork(b *testing.B) {
 		b.Run(taskCountName(n), func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				_ = scoped.Run(context.Background(), func(s *scoped.Scope) {
+				_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
 					for j := 0; j < n; j++ {
-						s.Go("", func(ctx context.Context) error {
+						s.Go("", func(ctx context.Context, _ scoped.Spawner) error {
 							return nil
 						})
 					}
@@ -34,9 +34,9 @@ func BenchmarkRunWithLimit(b *testing.B) {
 		b.Run(taskCountName(n), func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				_ = scoped.Run(context.Background(), func(s *scoped.Scope) {
+				_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
 					for j := 0; j < n; j++ {
-						s.Go("", func(ctx context.Context) error {
+						s.Go("", func(ctx context.Context, _ scoped.Spawner) error {
 							return nil
 						})
 					}
@@ -70,7 +70,7 @@ func BenchmarkGoResult(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		var results [10]*scoped.Result[int]
-		_ = scoped.Run(context.Background(), func(s *scoped.Scope) {
+		_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
 			for j := 0; j < 10; j++ {
 				j := j
 				results[j] = scoped.GoResult(s, "", func(ctx context.Context) (int, error) {

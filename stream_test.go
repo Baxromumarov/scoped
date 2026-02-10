@@ -118,7 +118,7 @@ func TestBatch(t *testing.T) {
 
 func TestParallelMap(t *testing.T) {
 	t.Run("Unordered", func(t *testing.T) {
-		err := Run(context.Background(), func(s *Scope) {
+		err := Run(context.Background(), func(s Spawner) {
 			items := []int{1, 2, 3, 4, 5}
 			src := FromSlice(items)
 			pm := ParallelMap(context.Background(), s, src, StreamOptions{MaxWorkers: 3}, func(ctx context.Context, v int) (int, error) {
@@ -148,7 +148,7 @@ func TestParallelMap(t *testing.T) {
 	})
 
 	t.Run("Ordered", func(t *testing.T) {
-		err := Run(context.Background(), func(s *Scope) {
+		err := Run(context.Background(), func(s Spawner) {
 			items := []int{1, 2, 3, 4, 5}
 			src := FromSlice(items)
 			pm := ParallelMap(context.Background(), s, src, StreamOptions{MaxWorkers: 3, Ordered: true}, func(ctx context.Context, v int) (int, error) {
@@ -184,7 +184,7 @@ func TestStreamError(t *testing.T) {
 
 func TestParallelMapError(t *testing.T) {
 	wantErr := errors.New("worker-boom")
-	err := Run(context.Background(), func(s *Scope) {
+	err := Run(context.Background(), func(s Spawner) {
 		src := FromSlice([]int{1, 2, 3})
 		pm := ParallelMap(context.Background(), s, src, StreamOptions{MaxWorkers: 2}, func(ctx context.Context, v int) (int, error) {
 			if v == 2 {

@@ -18,24 +18,63 @@ package main
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/baxromumarov/scoped"
 )
 
-func main() {
-	err := scoped.Run(context.Background(), func(s *scoped.Scope) {
-		s.Go("hello", func(ctx context.Context) error {
-			fmt.Println("hello")
-			return nil
-		})
-		s.Go("world", func(ctx context.Context) error {
-			fmt.Println("world")
-			return nil
-		})
-	})
-	if err != nil {
-		panic(err)
+func w1(ctx context.Context) error {
+	select {
+	case <-time.After(1 * time.Second):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+}
+
+func w2(ctx context.Context) error {
+	select {
+	case <-time.After(1 * time.Second):
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func w3(ctx context.Context) error {
+	return fmt.Errorf("w3 failed")
+}
+
+func main() {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	arr := []func(context.Context) error{w3, w1, w2}
+
+	now := time.Now()
+
+	err := scoped.Run(
+		ctx,
+		func(sp scoped.Spawner) {
+			for idx, f := range arr {
+				f := f
+				sp.Go(
+					fmt.Sprintf("%d index", idx),
+					func(ctx context.Context, _ scoped.Spawner) error {
+						return f(ctx)
+					},
+				)
+			}
+		},
+		scoped.WithPolicy(scoped.FailFast),
+		scoped.WithPanicAsError(),
+	)
+
+	if err != nil {
+		fmt.Println("Final error:", err)
+	}
+
+	fmt.Println("Elapsed time:", time.Since(now))
 }
 ```
 

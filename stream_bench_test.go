@@ -48,7 +48,7 @@ func BenchmarkStream(b *testing.B) {
 			}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = Run(context.Background(), func(s *Scope) {
+				_ = Run(context.Background(), func(s Spawner) {
 					src := FromSlice(items)
 					pm := ParallelMap(
 						context.Background(),
@@ -71,7 +71,7 @@ func BenchmarkStream(b *testing.B) {
 			}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				_ = Run(context.Background(), func(s *Scope) {
+				_ = Run(context.Background(), func(s Spawner) {
 					src := FromSlice(items)
 					pm := ParallelMap(
 						context.Background(),
@@ -100,7 +100,7 @@ func BenchmarkHeavyParallel(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = Run(context.Background(), func(s *Scope) {
+		_ = Run(context.Background(), func(s Spawner) {
 			src := FromSlice(items)
 			pm := ParallelMap(
 				context.Background(),

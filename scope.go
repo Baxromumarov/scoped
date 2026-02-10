@@ -8,65 +8,55 @@ import (
 	"time"
 )
 
-// Scope lifecycle states.
-const (
-	stateOpen    int32 = iota // Go() allowed
-	stateClosing              // Wait() called, draining tasks
-	stateClosed               // all tasks finished
-)
+// TaskFunc is the signature for a task function running within a scope.
+// It receives a context (cancelled when the scope ends) and a Spawner
+// to spawn sub-tasks.
+type TaskFunc func(ctx context.Context, sp Spawner) error
 
-// Scope manages a set of concurrent tasks with structured lifecycle
-// guarantees. Every goroutine spawned via [Scope.Go] is owned by the
-// Scope and must complete before [Scope.Wait] returns.
-//
-// Use [Run] for automatic lifecycle management (preferred), or
-// [New] + [Scope.Wait] for advanced use cases.
-type Scope struct {
+// Spawner allows spawning concurrent tasks into a scope.
+type Spawner interface {
+	// Go starts a new concurrent task with the given name.
+	// The task function receives a child Spawner allowing it to create sub-tasks.
+	Go(name string, fn TaskFunc)
+}
+
+// ======================
+// Scope internals
+// ======================
+
+// scope maintains the state of a structured concurrency scope.
+type scope struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
 	cfg    config
 
-	state atomic.Int32
-	wg    sync.WaitGroup
+	wg sync.WaitGroup
 
-	// FailFast: stores the first error.
-	firstErr error
+	// error handling
+	firstErr atomic.Value // for concurrent access in Go and Wait
 	errOnce  sync.Once
 
-	// Collect: accumulates all errors.
-	errs  []*TaskError
 	errMu sync.Mutex
+	errs  []*TaskError
 
-	// Panics captured from child tasks (when panicAsErr is false).
-	panics  []*PanicError
 	panicMu sync.Mutex
+	panics  []*PanicError
 
-	// Semaphore for bounded concurrency.
 	sem chan struct{}
-
-	// Wait result caching for idempotent Wait.
-	waitOnce sync.Once
-	waitErr  error
 }
 
-// TaskError represents an error from a specific task, including its name and the error itself.
-// This struct is used to provide more context about which task failed when collecting errors in the Collect policy.
+// ======================
+// Public entry point
+// ======================
 
-// New creates a new Scope with the given parent context and options.
-// The returned context is a child of parent and is canceled when the
-// scope finishes or is explicitly canceled.
-//
-// The caller MUST call [Scope.Wait] when done spawning tasks.
-// Prefer [Run] for automatic lifecycle management.
-func New(parent context.Context, opts ...Option) (*Scope, context.Context) {
+func Run(parent context.Context, fn func(sp Spawner), opts ...Option) (err error) {
 	cfg := defaultConfig()
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	ctx, cancel := context.WithCancelCause(parent)
-
-	s := &Scope{
+	s := &scope{
 		ctx:    ctx,
 		cancel: cancel,
 		cfg:    cfg,
@@ -76,26 +66,15 @@ func New(parent context.Context, opts ...Option) (*Scope, context.Context) {
 		s.sem = make(chan struct{}, cfg.limit)
 	}
 
-	return s, ctx
-}
-
-// Run creates a Scope, executes fn (which should spawn tasks via
-// [Scope.Go]), and waits for all spawned tasks to complete.
-//
-// This is the preferred entry point for structured concurrency.
-// It guarantees that no goroutine outlives the returned error.
-// If fn panics, Run still waits for spawned tasks, then re-panics.
-//
-//	err := scoped.Run(ctx, func(s *scoped.Scope) {
-//	    s.Go("task-a", taskA)
-//	    s.Go("task-b", taskB)
-//	})
-//
-// If policy isn't given it is FailFast by default
-func Run(parent context.Context, fn func(s *Scope), opts ...Option) (err error) {
-	s, _ := New(parent, opts...)
+	root := &spawner{
+		s:    s,
+		open: atomic.Bool{},
+	}
+	root.open.Store(true)
 
 	defer func() {
+		root.close()
+
 		runPanic := recover()
 
 		var (
@@ -107,140 +86,133 @@ func Run(parent context.Context, fn func(s *Scope), opts ...Option) (err error) 
 			defer func() {
 				waitPanic = recover()
 			}()
-			waitErr = s.Wait()
+			waitErr = s.wait()
 		}()
 
-		// If fn panicked, preserve that panic after cleanup.
 		if runPanic != nil {
 			panic(runPanic)
 		}
-		// Otherwise propagate Wait panic semantics.
 		if waitPanic != nil {
 			panic(waitPanic)
 		}
 
 		err = waitErr
-
 	}()
 
-	fn(s)
+	fn(root)
 	return nil
 }
 
-// Go spawns a named task in the scope. The task function receives the
-// scope's context, which is canceled when the scope shuts down.
-//
-// Tasks may spawn additional sibling tasks by calling Go on the same scope.
-//
-// Go panics if called after [Scope.Wait] has returned (state is closed).
-func (s *Scope) Go(name string, fn func(ctx context.Context) error) {
-	if s.state.Load() >= stateClosed {
-		panic("scoped: Go called on a closed scope")
+// ======================
+// Spawner implementation
+// ======================
+
+// spawner implements the Spawner interface and manages the lifecycle of tasks.
+type spawner struct {
+	s      *scope
+	open   atomic.Bool
+	closed atomic.Bool
+}
+
+// Go implements Spawner.Go.
+func (sp *spawner) Go(name string, fn TaskFunc) {
+	if !sp.open.Load() {
+		panic("scoped: spawning after spawner closed")
 	}
 
-	s.wg.Add(1)
+	sp.s.wg.Add(1)
 	info := TaskInfo{Name: name}
 
 	go func() {
-		defer s.wg.Done()
+		defer sp.s.wg.Done()
 
-		// Acquire semaphore slot if bounded.
-		if s.sem != nil {
+		// semaphore
+		if sp.s.sem != nil {
 			select {
-			case s.sem <- struct{}{}:
-				defer func() { <-s.sem }()
-			case <-s.ctx.Done():
-				// Context canceled while waiting for a slot;
-				// report the context error so the task isn't silently dropped.
-				if s.cfg.onDone != nil {
-					s.cfg.onDone(info, s.ctx.Err(), 0)
-				}
-				s.recordError(info, s.ctx.Err())
+			case sp.s.sem <- struct{}{}:
+				defer func() { <-sp.s.sem }()
+			case <-sp.s.ctx.Done():
+				sp.s.recordError(info, sp.s.ctx.Err())
 				return
 			}
 		}
 
-		if s.cfg.onStart != nil {
-			s.cfg.onStart(info)
+		if sp.s.cfg.onStart != nil {
+			sp.s.cfg.onStart(info)
 		}
 
+		// child spawner
+		child := &spawner{
+			s:    sp.s,
+			open: atomic.Bool{},
+		}
+		child.open.Store(true)
+
 		start := time.Now()
-		err := s.exec(fn)
+		err := sp.s.exec(func(ctx context.Context) error {
+			return fn(ctx, child)
+		})
 		elapsed := time.Since(start)
 
-		if s.cfg.onDone != nil {
-			s.cfg.onDone(info, err, elapsed)
+		child.close()
+
+		if sp.s.cfg.onDone != nil {
+			sp.s.cfg.onDone(info, err, elapsed)
 		}
 
 		if err != nil {
-			s.recordError(info, err)
+			sp.s.recordError(info, err)
 		}
 	}()
 }
 
-// Wait waits for all tasks to complete and returns the resulting error.
-//
-// Behavior depends on the error policy:
-//   - [FailFast]: returns the first error (or nil).
-//   - [Collect]: returns all errors joined via [errors.Join] (or nil).
-//
-// If any task panicked and [WithPanicAsError] was not set, Wait re-panics
-// with the first [*PanicError]. The caller can recover it and inspect
-// [PanicError.Value] and [PanicError.Stack].
-//
-// Wait is safe to call multiple times; subsequent calls return the
-// cached result. If panics need re-raising, they are raised on every call.
-// When error happens first error will be returned
-func (s *Scope) Wait() error {
-	s.waitOnce.Do(func() {
-		s.state.Store(stateClosing)
-		s.wg.Wait()
-		s.state.Store(stateClosed)
-		s.cancel(nil) // release context resourcess
+// close marks the spawner as closed, preventing further Go calls.
+func (sp *spawner) close() {
+	if sp.closed.Swap(true) {
+		return
+	}
+	sp.open.Store(false)
+}
 
-		switch s.cfg.policy {
-		case FailFast:
-			s.waitErr = s.firstErr
-		case Collect:
-			s.errMu.Lock()
-			if len(s.errs) > 0 {
-				for _, taskErr := range s.errs {
-					s.waitErr = errors.Join(s.waitErr, taskErr)
-				}
-			}
-			s.errMu.Unlock()
-		}
-	})
+// ======================
+// Scope helpers
+// ======================
 
-	// Re-panic on every Wait call so callers always see the panic.
+// wait waits for all tasks to complete and returns the aggregated error.
+func (s *scope) wait() error {
+	s.wg.Wait()
+	s.cancel(nil)
+
 	if !s.cfg.panicAsErr {
 		s.panicMu.Lock()
-		panics := s.panics
-		s.panicMu.Unlock()
-		if len(panics) > 0 {
-			panic(panics[0])
+		defer s.panicMu.Unlock()
+		if len(s.panics) > 0 {
+			panic(s.panics[0])
 		}
 	}
 
-	return s.waitErr
+	switch s.cfg.policy {
+	case FailFast:
+		if v := s.firstErr.Load(); v != nil {
+			return v.(error)
+		}
+	case Collect:
+		s.errMu.Lock()
+		defer s.errMu.Unlock()
+		if len(s.errs) > 0 {
+			errs := make([]error, 0, len(s.errs))
+			for _, te := range s.errs {
+				errs = append(errs, te)
+			}
+			return errors.Join(errs...)
+		}
+	}
+
+	return nil
 }
 
-// Context returns the scope's context. It is canceled when the scope
-// finishes or when [Scope.Cancel] is called.
-func (s *Scope) Context() context.Context {
-	return s.ctx
-}
-
-// Cancel cancels the scope with the given cause. All child tasks will
-// observe the cancellation via the context passed to their function.
-func (s *Scope) Cancel(cause error) {
-	s.cancel(cause)
-}
-
-// exec runs fn with panic recovery. If fn panics, the panic is either
-// converted to a *PanicError (if panicAsErr is set) or stored for
-// re-raising in Wait.
-func (s *Scope) exec(fn func(ctx context.Context) error) (err error) {
+// exec runs a function with panic recovery.
+func (s *scope) exec(fn func(ctx context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			pe := newPanicError(r)
@@ -257,12 +229,12 @@ func (s *Scope) exec(fn func(ctx context.Context) error) (err error) {
 	return fn(s.ctx)
 }
 
-// recordError stores an error according to the configured policy.
-func (s *Scope) recordError(taskInfo TaskInfo, err error) {
+// recordError records an error according to the configured policy.
+func (s *scope) recordError(taskInfo TaskInfo, err error) {
 	switch s.cfg.policy {
 	case FailFast:
 		s.errOnce.Do(func() {
-			s.firstErr = err
+			s.firstErr.Store(err)
 			s.cancel(err)
 		})
 	case Collect:

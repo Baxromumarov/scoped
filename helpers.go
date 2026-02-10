@@ -21,12 +21,12 @@ func ForEachSlice[T any](
 ) error {
 	return Run(
 		ctx,
-		func(s *Scope) {
+		func(sp Spawner) {
 			for i, item := range items {
 				item := item // capture for Go < 1.22
-				s.Go(
+				sp.Go(
 					fmt.Sprintf("foreach[%d]", i),
-					func(ctx context.Context) error {
+					func(ctx context.Context, _ Spawner) error {
 						return fn(ctx, item)
 					},
 				)
@@ -58,12 +58,12 @@ func MapSlice[T, R any](
 	results := make([]R, len(items))
 	err := Run(
 		ctx,
-		func(s *Scope) {
+		func(sp Spawner) {
 			for i, item := range items {
 				i, item := i, item // capture for Go < 1.22
-				s.Go(
+				sp.Go(
 					fmt.Sprintf("map[%d]", i),
-					func(ctx context.Context) error {
+					func(ctx context.Context, _ Spawner) error {
 						r, err := fn(ctx, item)
 						if err != nil {
 							return err

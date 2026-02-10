@@ -151,24 +151,34 @@ func TestRunFailFast(t *testing.T) {
 
 func TestRunFailFastCancelsOthers(t *testing.T) {
 	var cancelled atomic.Int32
+	started := make(chan struct{}, 5)
+
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		// Error task.
+		// Long-running tasks
+		for i := 0; i < 5; i++ {
+			sp.Go("worker", func(ctx context.Context, _ scoped.Spawner) error {
+				started <- struct{}{} // signal ready
+				<-ctx.Done()
+				cancelled.Add(1)
+				return ctx.Err()
+			})
+		}
+
+		// Ensure all workers are started
+		for i := 0; i < 5; i++ {
+			<-started
+		}
+
+		// Error task
 		sp.Go("fail", func(ctx context.Context, _ scoped.Spawner) error {
 			return errors.New("boom")
 		})
-		// Long-running tasks that should be cancelled.
-		for i := 0; i < 5; i++ {
-			sp.Go("worker", func(ctx context.Context, _ scoped.Spawner) error {
-				<-ctx.Done()
-				cancelled.Add(1)
-				return nil
-			})
-		}
 	})
+
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	// Run waits for all tasks, so cancelled count is already final.
+
 	if got := cancelled.Load(); got != 5 {
 		t.Fatalf("expected 5 workers cancelled, got %d", got)
 	}

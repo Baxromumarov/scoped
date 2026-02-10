@@ -45,12 +45,13 @@ func (sp *spawner) Go(name string, fn TaskFunc) {
 			}
 		}
 
-		if sp.s.cfg.onStart != nil {
-			sp.s.cfg.onStart(info)
+		if err := sp.s.ctx.Err(); err != nil {
+			sp.s.recordError(info, err)
+			return
 		}
 
-		if sp.s.ctx.Err() != nil {
-			panic("scoped: Go called after scope canceled")
+		if sp.s.cfg.onStart != nil {
+			sp.s.cfg.onStart(info)
 		}
 
 		//child spawner is valid only for the lifetime of the task;

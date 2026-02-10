@@ -73,7 +73,7 @@ func BenchmarkGoResult(b *testing.B) {
 		_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
 			for j := 0; j < 10; j++ {
 				j := j
-				results[j] = scoped.GoResult(s, "", func(ctx context.Context) (int, error) {
+				results[j] = scoped.SpawnResult(s, "", func(ctx context.Context) (int, error) {
 					return j * 2, nil
 				})
 			}

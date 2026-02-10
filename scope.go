@@ -17,7 +17,7 @@
 //
 //	sc, spawner := New(context.Background())
 //	spawner.Spawn(func(ctx context.Context, sp Spawner) error {
-//	    // task implementation
+//	    *task implementation is here*
 //	    return nil
 //	})
 //	err := sc.Wait()
@@ -164,6 +164,20 @@ type Scope struct {
 	root *spawner
 	once sync.Once
 }
+
+// New creates a new Scope with the given parent context and options. It returns the Scope and
+// a Spawner for spawning tasks within the scope. The Scope must be finalized by calling Wait().
+/*
+	Example:
+
+	sc, sp := New(context.Background(), WithPolicy(Collect))
+	sp.Spawn("task1", func(ctx context.Context, sp Spawner) error {
+	    *task implementation is here*
+	    return nil
+	})
+	err := sc.Wait()
+
+*/
 
 func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 	cfg := defaultConfig()

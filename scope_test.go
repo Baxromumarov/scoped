@@ -527,7 +527,7 @@ func TestHookPanicBehavior(t *testing.T) {
 func TestGoResult(t *testing.T) {
 	var r *scoped.Result[int]
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		r = scoped.GoResult(sp, "compute", func(ctx context.Context) (int, error) {
+		r = scoped.SpawnResult(sp, "compute", func(ctx context.Context) (int, error) {
 			return 42, nil
 		})
 	})
@@ -547,7 +547,7 @@ func TestGoResultError(t *testing.T) {
 	sentinel := errors.New("compute failed")
 	var r *scoped.Result[int]
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		r = scoped.GoResult(sp, "compute", func(ctx context.Context) (int, error) {
+		r = scoped.SpawnResult(sp, "compute", func(ctx context.Context) (int, error) {
 			return 0, sentinel
 		})
 	})
@@ -564,7 +564,7 @@ func TestGoResultContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var r *scoped.Result[int]
 	err := scoped.Run(ctx, func(sp scoped.Spawner) {
-		r = scoped.GoResult(sp, "slow", func(ctx context.Context) (int, error) {
+		r = scoped.SpawnResult(sp, "slow", func(ctx context.Context) (int, error) {
 			<-ctx.Done()
 			return 0, ctx.Err()
 		})
@@ -585,7 +585,7 @@ func TestGoResultPanic(t *testing.T) {
 	err := scoped.Run(
 		context.Background(),
 		func(sp scoped.Spawner) {
-			r = scoped.GoResult(sp,
+			r = scoped.SpawnResult(sp,
 				"compute",
 				func(ctx context.Context) (int, error) {
 					panic("boom")

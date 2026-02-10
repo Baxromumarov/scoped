@@ -200,7 +200,7 @@ func ParallelMap[A, B any](
 	out := &Stream[B]{}
 	out.next = makeParallelNext(out, opts, resCh)
 
-	sp.Go("parallel-map-dispatcher", func(ctx context.Context, sp Spawner) error {
+	sp.Spawn("parallel-map-dispatcher", func(ctx context.Context, sp Spawner) error {
 		defer close(resCh)
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, opts.MaxWorkers)
@@ -224,7 +224,7 @@ func ParallelMap[A, B any](
 				return ctx.Err()
 			}
 
-			sp.Go("parallel-map-worker", func(ctx context.Context, _ Spawner) error {
+			sp.Spawn("parallel-map-worker", func(ctx context.Context, _ Spawner) error {
 				defer func() { <-sem; wg.Done() }()
 				res, err := fn(ctx, val)
 				select {
@@ -397,7 +397,7 @@ func (s *Stream[T]) ToChan(ctx context.Context) (<-chan T, <-chan error) {
 func (s *Stream[T]) ToChanScope(sp Spawner) (<-chan T, <-chan error) {
 	ch := make(chan T)
 	errCh := make(chan error, 1)
-	sp.Go("stream-to-chan", func(ctx context.Context, _ Spawner) error {
+	sp.Spawn("stream-to-chan", func(ctx context.Context, _ Spawner) error {
 		defer close(ch)
 		defer close(errCh)
 		for {

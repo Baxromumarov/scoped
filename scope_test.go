@@ -39,23 +39,29 @@ func TestNestedTasks(t *testing.T) {
 		func(sp scoped.Spawner) {
 			for _, tk := range tasks {
 				tk := tk
-				sp.Go(tk.name, func(ctx context.Context, sp scoped.Spawner) error {
-					if tk.idx == 5 {
-						panic("just test panic")
-					}
-					if tk.idx%2 == 0 {
-						sp.Go(fmt.Sprintf("%s-child", tk.name), func(ctx context.Context, _ scoped.Spawner) error {
-							time.Sleep(10 * time.Millisecond)
-							return nil
-						})
-					}
+				sp.Spawn(
+					tk.name,
+					func(ctx context.Context, sp scoped.Spawner) error {
+						if tk.idx == 5 {
+							panic("just test panic")
+						}
+						if tk.idx%2 == 0 {
+							sp.Spawn(
+								fmt.Sprintf("%s-child", tk.name),
+								func(ctx context.Context, _ scoped.Spawner) error {
+									time.Sleep(10 * time.Millisecond)
+									return nil
+								},
+							)
+						}
 
-					if tk.idx == 3 {
-						return errors.New("just test error")
-					}
+						if tk.idx == 3 {
+							return errors.New("just test error")
+						}
 
-					return nil
-				})
+						return nil
+					},
+				)
 			}
 		},
 		scoped.WithPanicAsError(),
@@ -72,7 +78,7 @@ func TestRunAllSuccess(t *testing.T) {
 	var count atomic.Int32
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < 10; i++ {
-			sp.Go("task", func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn("task", func(ctx context.Context, _ scoped.Spawner) error {
 				count.Add(1)
 				return nil
 			})
@@ -113,10 +119,10 @@ func TestRunSetupPanicStillClosesScope(t *testing.T) {
 	}
 
 	lateGoPanic := capturePanic(func() {
-		runScope.Go("late", func(context.Context, scoped.Spawner) error { return nil })
+		runScope.Spawn("late", func(context.Context, scoped.Spawner) error { return nil })
 	})
 	if lateGoPanic == nil {
-		t.Fatal("expected Go to panic after Run setup panic cleanup")
+		t.Fatal("expected Spawn to panic after Run setup panic cleanup")
 	}
 }
 
@@ -134,7 +140,7 @@ func TestRunFailFast(t *testing.T) {
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < 10; i++ {
 			i := i
-			sp.Go(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				if i == 3 {
 					return sentinel
 				}
@@ -156,7 +162,7 @@ func TestRunFailFastCancelsOthers(t *testing.T) {
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		// Long-running tasks
 		for i := 0; i < 5; i++ {
-			sp.Go("worker", func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn("worker", func(ctx context.Context, _ scoped.Spawner) error {
 				started <- struct{}{} // signal ready
 				<-ctx.Done()
 				cancelled.Add(1)
@@ -170,7 +176,7 @@ func TestRunFailFastCancelsOthers(t *testing.T) {
 		}
 
 		// Error task
-		sp.Go("fail", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("fail", func(ctx context.Context, _ scoped.Spawner) error {
 			return errors.New("boom")
 		})
 	})
@@ -188,7 +194,7 @@ func TestRunCollect(t *testing.T) {
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < 5; i++ {
 			i := i
-			sp.Go(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				return fmt.Errorf("error-%d", i)
 			})
 		}
@@ -208,12 +214,12 @@ func TestRunCollectNoCancellation(t *testing.T) {
 	var completed atomic.Int32
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		// One task errors...
-		sp.Go("fail", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("fail", func(ctx context.Context, _ scoped.Spawner) error {
 			return errors.New("fail")
 		})
 		// ...but siblings should NOT be cancelled.
 		for i := 0; i < 3; i++ {
-			sp.Go("worker", func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn("worker", func(ctx context.Context, _ scoped.Spawner) error {
 				time.Sleep(20 * time.Millisecond)
 				completed.Add(1)
 				return nil
@@ -247,7 +253,7 @@ func TestRunPanicReRaised(t *testing.T) {
 	}()
 
 	_ = scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		sp.Go("panicker", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("panicker", func(ctx context.Context, _ scoped.Spawner) error {
 			panic("boom")
 		})
 	})
@@ -255,7 +261,7 @@ func TestRunPanicReRaised(t *testing.T) {
 
 func TestRunPanicAsError(t *testing.T) {
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		sp.Go("panicker", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("panicker", func(ctx context.Context, _ scoped.Spawner) error {
 			panic("boom")
 		})
 	}, scoped.WithPanicAsError())
@@ -286,7 +292,7 @@ func TestRunMultiplePanicsFirstReRaised(t *testing.T) {
 	_ = scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < 5; i++ {
 			i := i
-			sp.Go(fmt.Sprintf("p-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn(fmt.Sprintf("p-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				panic(fmt.Sprintf("panic-%d", i))
 			})
 		}
@@ -300,7 +306,7 @@ func TestRunLimit(t *testing.T) {
 
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < 20; i++ {
-			sp.Go("worker", func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn("worker", func(ctx context.Context, _ scoped.Spawner) error {
 				cur := active.Add(1)
 				// Record the high-water mark.
 				for {
@@ -333,7 +339,7 @@ func TestRunLimitContextCancel(t *testing.T) {
 	err := scoped.Run(ctx, func(sp scoped.Spawner) {
 
 		// Fill the single semaphore slot with a blocker.
-		sp.Go("blocker", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("blocker", func(ctx context.Context, _ scoped.Spawner) error {
 			close(blockerStarted)
 			<-blockerDone
 			return nil
@@ -343,7 +349,7 @@ func TestRunLimitContextCancel(t *testing.T) {
 		<-blockerStarted
 
 		// This waiter will block on semaphore acquisition.
-		sp.Go("waiter", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("waiter", func(ctx context.Context, _ scoped.Spawner) error {
 			waiterRan.Store(true)
 			return nil
 		})
@@ -377,7 +383,7 @@ func TestRunExternalCancel(t *testing.T) {
 
 	var sawCancel atomic.Bool
 	err := scoped.Run(ctx, func(sp scoped.Spawner) {
-		sp.Go("long", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("long", func(ctx context.Context, _ scoped.Spawner) error {
 			<-ctx.Done()
 			sawCancel.Store(true)
 			return ctx.Err()
@@ -394,11 +400,11 @@ func TestRunExternalCancel(t *testing.T) {
 func TestRunSubTasks(t *testing.T) {
 	var count atomic.Int32
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		sp.Go("parent", func(ctx context.Context, sp scoped.Spawner) error {
+		sp.Spawn("parent", func(ctx context.Context, sp scoped.Spawner) error {
 			count.Add(1)
 			// Spawn children from within a task.
 			for i := 0; i < 3; i++ {
-				sp.Go("child", func(ctx context.Context, _ scoped.Spawner) error {
+				sp.Spawn("child", func(ctx context.Context, _ scoped.Spawner) error {
 					count.Add(1)
 					return nil
 				})
@@ -418,7 +424,7 @@ func TestContextPropagation(t *testing.T) {
 	type key struct{}
 	ctx := context.WithValue(context.Background(), key{}, "hello")
 	err := scoped.Run(ctx, func(sp scoped.Spawner) {
-		sp.Go("task", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("task", func(ctx context.Context, _ scoped.Spawner) error {
 			if got := ctx.Value(key{}); got != "hello" {
 				return fmt.Errorf("expected 'hello', got %v", got)
 			}
@@ -438,11 +444,11 @@ func TestHooks(t *testing.T) {
 	)
 
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		sp.Go("alpha", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("alpha", func(ctx context.Context, _ scoped.Spawner) error {
 			time.Sleep(5 * time.Millisecond)
 			return nil
 		})
-		sp.Go("beta", func(ctx context.Context, _ scoped.Spawner) error {
+		sp.Spawn("beta", func(ctx context.Context, _ scoped.Spawner) error {
 			return nil
 		})
 	},
@@ -477,13 +483,13 @@ func TestHookPanicBehavior(t *testing.T) {
 		switch mode {
 		case "start":
 			_ = scoped.Run(context.Background(), func(sp scoped.Spawner) {
-				sp.Go("task", func(ctx context.Context, _ scoped.Spawner) error { return nil })
+				sp.Spawn("task", func(ctx context.Context, _ scoped.Spawner) error { return nil })
 			}, scoped.WithOnStart(func(scoped.TaskInfo) {
 				panic("hook panic start")
 			}))
 		case "done":
 			_ = scoped.Run(context.Background(), func(sp scoped.Spawner) {
-				sp.Go("task", func(ctx context.Context, _ scoped.Spawner) error { return nil })
+				sp.Spawn("task", func(ctx context.Context, _ scoped.Spawner) error { return nil })
 			}, scoped.WithOnDone(func(scoped.TaskInfo, error, time.Duration) {
 				panic("hook panic done")
 			}))
@@ -668,7 +674,7 @@ func TestRunStress(t *testing.T) {
 	var count atomic.Int32
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < n; i++ {
-			sp.Go("", func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 				count.Add(1)
 				return nil
 			})
@@ -690,7 +696,7 @@ func TestRunStressWithLimit(t *testing.T) {
 	var count atomic.Int32
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < n; i++ {
-			sp.Go("", func(ctx context.Context, _ scoped.Spawner) error {
+			sp.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 				count.Add(1)
 				return nil
 			})
@@ -716,7 +722,7 @@ func TestRun_BasicTasks(t *testing.T) {
 	var ran atomic.Int32
 
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		sp.Go("task", func(ctx context.Context, sp scoped.Spawner) error {
+		sp.Spawn("task", func(ctx context.Context, sp scoped.Spawner) error {
 			ran.Add(1)
 			return nil
 		})
@@ -734,11 +740,11 @@ func TestRun_SubTasks(t *testing.T) {
 	var count atomic.Int32
 
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		sp.Go("parent", func(ctx context.Context, sp scoped.Spawner) error {
+		sp.Spawn("parent", func(ctx context.Context, sp scoped.Spawner) error {
 			count.Add(1)
 
 			for i := 0; i < 3; i++ {
-				sp.Go("child", func(ctx context.Context, _ scoped.Spawner) error {
+				sp.Spawn("child", func(ctx context.Context, _ scoped.Spawner) error {
 					count.Add(1)
 					return nil
 				})

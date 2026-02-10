@@ -1,6 +1,6 @@
 # scoped
 
-`scoped` is a small Go package for structured concurrency.
+`scoped` is a small Spawn package for structured concurrency.
 
 It helps you run goroutines with a clear lifecycle: start tasks in a scope, wait for all of them, and handle cancellation/errors consistently.
 
@@ -58,7 +58,7 @@ func main() {
 		func(sp scoped.Spawner) {
 			for idx, f := range arr {
 				f := f
-				sp.Go(
+				sp.Spawn(
 					fmt.Sprintf("%d index", idx),
 					func(ctx context.Context, _ scoped.Spawner) error {
 						return f(ctx)

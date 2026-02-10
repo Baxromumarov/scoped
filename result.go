@@ -26,7 +26,7 @@ func GoResult[T any](
 	r := &Result[T]{
 		done: make(chan struct{}),
 	}
-	sp.Go(name, func(ctx context.Context, _ Spawner) error {
+	sp.Spawn(name, func(ctx context.Context, _ Spawner) error {
 		defer close(r.done)
 		defer func() {
 			if rec := recover(); rec != nil {

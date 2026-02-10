@@ -8,9 +8,9 @@ import (
 
 // Spawner allows spawning concurrent tasks into a scope.
 type Spawner interface {
-	// Go starts a new concurrent task with the given name.
+	// Spawn starts a new concurrent task with the given name.
 	// The task function receives a child Spawner allowing it to create sub-tasks.
-	Go(name string, fn TaskFunc)
+	Spawn(name string, fn TaskFunc)
 }
 
 // spawner implements the Spawner interface and manages the lifecycle of tasks.
@@ -19,14 +19,14 @@ type spawner struct {
 	open atomic.Bool
 }
 
-// Go implements Spawner.Go.
+// Spawn implements Spawner.Spawn.
 
-func (sp *spawner) Go(name string, fn TaskFunc) {
+func (sp *spawner) Spawn(name string, fn TaskFunc) {
 	sp.s.wg.Add(1)
 
 	if !sp.open.Load() {
 		sp.s.wg.Done() // undo the Add for this task
-		panic("scoped: Go called after scope shutdown")
+		panic("scoped: Spawn called after scope shutdown")
 	}
 
 	info := TaskInfo{Name: name}
@@ -80,7 +80,7 @@ func (sp *spawner) Go(name string, fn TaskFunc) {
 	}()
 }
 
-// close marks the spawner as closed, preventing further Go calls.
+// close marks the spawner as closed, preventing further Spawn calls.
 func (sp *spawner) close() {
 	sp.open.Store(false)
 }

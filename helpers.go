@@ -9,7 +9,7 @@ import (
 // ForEachSlice executes fn for each item in the slice concurrently,
 // using the provided options to control concurrency and error policy.
 //
-// This is a convenience wrapper around [Run] and [Scope.Go].
+// This is a convenience wrapper around [Run] and [Scope.Spawn].
 //
 //	err := scoped.ForEachSlice(ctx, URLs, func(ctx context.Context, u string) error {
 //	    return fetch(ctx, u)
@@ -24,8 +24,8 @@ func ForEachSlice[T any](
 		ctx,
 		func(sp Spawner) {
 			for i, item := range items {
-				item := item // capture for Go < 1.22
-				sp.Go(
+				item := item // capture for Spawn < 1.22
+				sp.Spawn(
 					fmt.Sprintf("foreach[%d]", i),
 					func(ctx context.Context, _ Spawner) error {
 						return fn(ctx, item)
@@ -61,8 +61,8 @@ func MapSlice[T, R any](
 		ctx,
 		func(sp Spawner) {
 			for i, item := range items {
-				i, item := i, item // capture for Go < 1.22
-				sp.Go(
+				i, item := i, item // capture for Spawn < 1.22
+				sp.Spawn(
 					fmt.Sprintf("map[%d]", i),
 					func(ctx context.Context, _ Spawner) error {
 						r, err := fn(ctx, item)

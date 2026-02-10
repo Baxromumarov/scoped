@@ -1,18 +1,18 @@
-// Package scoped provides structured concurrency primitives for Go.
+// Package scoped provides structured concurrency primitives for Spawn.
 //
 // Structured concurrency ensures that concurrent tasks have well-defined
 // lifecycles: they are spawned and joined within a clear scope, preventing
 // goroutine leaks, orphaned tasks, and unpredictable control flow.
 //
 // The primary entry point is [Run], which creates a [Scope], executes a
-// function that spawns tasks via [Scope.Go], and waits for all tasks to
+// function that spawns tasks via [Scope.Spawn], and waits for all tasks to
 // complete before returning:
 //
 //	err := scoped.Run(ctx, func(s *scoped.Scope) {
-//	    s.Go("fetch", func(ctx context.Context) error {
+//	    s.Spawn("fetch", func(ctx context.Context) error {
 //	        return fetch(ctx)
 //	    })
-//	    s.Go("process", func(ctx context.Context) error {
+//	    s.Spawn("process", func(ctx context.Context) error {
 //	        return process(ctx)
 //	    })
 //	})

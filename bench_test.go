@@ -18,7 +18,7 @@ func BenchmarkRunNoWork(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
 					for j := 0; j < n; j++ {
-						s.Go("", func(ctx context.Context, _ scoped.Spawner) error {
+						s.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 							return nil
 						})
 					}
@@ -36,7 +36,7 @@ func BenchmarkRunWithLimit(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
 					for j := 0; j < n; j++ {
-						s.Go("", func(ctx context.Context, _ scoped.Spawner) error {
+						s.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 							return nil
 						})
 					}

@@ -43,7 +43,7 @@ func main() {
 		func(sp scoped.Spawner) {
 			for idx, f := range arr {
 				f := f
-				sp.Go(
+				sp.Spawn(
 					fmt.Sprintf("%d index", idx),
 					func(ctx context.Context, _ scoped.Spawner) error {
 						return f(ctx)
@@ -74,7 +74,7 @@ func main() {
 
 // 	for idx, f := range arr {
 // 		f := f
-// 		scope.Go(
+// 		scope.Spawn(
 // 			fmt.Sprintf("worker: %d", idx),
 // 			func(ctx context.Context) error {
 // 				return f(ctx)
@@ -190,16 +190,16 @@ func main() {
 	err := scoped.Run(
 		context.Background(),
 		func(s *scoped.Scope) {
-			s.Go("first child", func(ctx context.Context) error {
+			s.Spawn("first child", func(ctx context.Context) error {
 				fmt.Println("first child")
 
-				s.Go("second child", func(ctx context.Context) error {
+				s.Spawn("second child", func(ctx context.Context) error {
 					fmt.Println("second child")
-					s.Go("third child", func(ctx context.Context) error {
+					s.Spawn("third child", func(ctx context.Context) error {
 						fmt.Println("third child")
 
 						err := scoped.Run(ctx, func(s *scoped.Scope) {
-							s.Go("fourth child from another parent", func(ctx context.Context) error {
+							s.Spawn("fourth child from another parent", func(ctx context.Context) error {
 								fmt.Println("fourth child from another parent")
 								time.Sleep(1 * time.Second)
 								panic("error just test")

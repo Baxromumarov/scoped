@@ -34,7 +34,7 @@ type Scope struct {
 	errOnce  sync.Once
 
 	// Collect: accumulates all errors.
-	errs  []error
+	errs  []*TaskError
 	errMu sync.Mutex
 
 	// Panics captured from child tasks (when panicAsErr is false).
@@ -48,6 +48,9 @@ type Scope struct {
 	waitOnce sync.Once
 	waitErr  error
 }
+
+// TaskError represents an error from a specific task, including its name and the error itself.
+// This struct is used to provide more context about which task failed when collecting errors in the Collect policy.
 
 // New creates a new Scope with the given parent context and options.
 // The returned context is a child of parent and is canceled when the
@@ -87,6 +90,8 @@ func New(parent context.Context, opts ...Option) (*Scope, context.Context) {
 //	    s.Go("task-a", taskA)
 //	    s.Go("task-b", taskB)
 //	})
+//
+// If policy isn't given it is FailFast by default
 func Run(parent context.Context, fn func(s *Scope), opts ...Option) (err error) {
 	s, _ := New(parent, opts...)
 
@@ -115,6 +120,7 @@ func Run(parent context.Context, fn func(s *Scope), opts ...Option) (err error) 
 		}
 
 		err = waitErr
+
 	}()
 
 	fn(s)
@@ -149,7 +155,7 @@ func (s *Scope) Go(name string, fn func(ctx context.Context) error) {
 				if s.cfg.onDone != nil {
 					s.cfg.onDone(info, s.ctx.Err(), 0)
 				}
-				s.recordError(s.ctx.Err())
+				s.recordError(info, s.ctx.Err())
 				return
 			}
 		}
@@ -167,7 +173,7 @@ func (s *Scope) Go(name string, fn func(ctx context.Context) error) {
 		}
 
 		if err != nil {
-			s.recordError(err)
+			s.recordError(info, err)
 		}
 	}()
 }
@@ -190,7 +196,7 @@ func (s *Scope) Wait() error {
 		s.state.Store(stateClosing)
 		s.wg.Wait()
 		s.state.Store(stateClosed)
-		s.cancel(nil) // release context resources
+		s.cancel(nil) // release context resourcess
 
 		switch s.cfg.policy {
 		case FailFast:
@@ -198,7 +204,9 @@ func (s *Scope) Wait() error {
 		case Collect:
 			s.errMu.Lock()
 			if len(s.errs) > 0 {
-				s.waitErr = errors.Join(s.errs...)
+				for _, taskErr := range s.errs {
+					s.waitErr = errors.Join(s.waitErr, taskErr)
+				}
 			}
 			s.errMu.Unlock()
 		}
@@ -250,7 +258,7 @@ func (s *Scope) exec(fn func(ctx context.Context) error) (err error) {
 }
 
 // recordError stores an error according to the configured policy.
-func (s *Scope) recordError(err error) {
+func (s *Scope) recordError(taskInfo TaskInfo, err error) {
 	switch s.cfg.policy {
 	case FailFast:
 		s.errOnce.Do(func() {
@@ -259,7 +267,10 @@ func (s *Scope) recordError(err error) {
 		})
 	case Collect:
 		s.errMu.Lock()
-		s.errs = append(s.errs, err)
+		s.errs = append(s.errs, &TaskError{
+			Task: taskInfo,
+			Err:  err,
+		})
 		s.errMu.Unlock()
 	}
 }

@@ -44,10 +44,10 @@ func WithPolicy(p Policy) Option {
 	return func(c *config) {
 		switch p {
 		case FailFast, Collect:
+			c.policy = p
 		default:
 			panic("scoped: invalid policy")
 		}
-		c.policy = p
 	}
 }
 

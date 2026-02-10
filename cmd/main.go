@@ -38,35 +38,28 @@ func main() {
 
 	now := time.Now()
 
-	for idx, f := range arr {
-		f := f
-		err := scoped.Run(
-			ctx,
-			func(s *scoped.Scope) {
+	err := scoped.Run(
+		ctx,
+		func(s *scoped.Scope) {
+			for idx, f := range arr {
+				f := f
 				s.Go(
 					fmt.Sprintf("%d index", idx),
 					func(ctx context.Context) error {
 						return f(ctx)
 					},
 				)
-			},
-			scoped.WithPanicAsError(),
-			/*
-				TODO: when policy is failfast it is not working, it should return error immediately
-				but it is running other task and returning this error in current case:
-					Error from worker 0: w3 failed
-					Error from worker 1: context deadline exceeded
-					Error from worker 2: context deadline exceeded
-					Elapsed time:  0.050548618
-			*/
-			scoped.WithPolicy(scoped.FailFast),
-		)
-		if err != nil {
-			fmt.Printf("Error from worker %d: %v\n", idx, err)
-		}
+			}
+		},
+		scoped.WithPolicy(scoped.Collect),
+		scoped.WithPanicAsError(),
+	)
+
+	if err != nil {
+		fmt.Println("Final error:", err)
 	}
 
-	fmt.Println("Elapsed time: ", time.Since(now).Seconds())
+	fmt.Println("Elapsed time:", time.Since(now))
 }
 
 // func main() {

@@ -3,6 +3,7 @@ package scoped
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 )
 
 // ForEachSlice executes fn for each item in the slice concurrently,
@@ -80,4 +81,23 @@ func MapSlice[T, R any](
 		return nil, err
 	}
 	return results, nil
+}
+
+type atomicError struct{ v atomic.Value }
+
+func (a *atomicError) Store(err error) {
+	if err == nil {
+		// atomic.Value cannot Store(nil), so store a typed nil marker if you want
+		a.v.Store((error)(nil))
+		return
+	}
+	a.v.Store(err)
+}
+
+func (a *atomicError) Load() error {
+	v := a.v.Load()
+	if v == nil {
+		return nil
+	}
+	return v.(error)
 }

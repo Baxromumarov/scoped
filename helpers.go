@@ -24,7 +24,6 @@ func ForEachSlice[T any](
 		ctx,
 		func(sp Spawner) {
 			for i, item := range items {
-				item := item // capture for Spawn < 1.22
 				sp.Spawn(
 					fmt.Sprintf("for-each [%d]", i),
 					func(ctx context.Context, _ Spawner) error {
@@ -77,7 +76,6 @@ func MapSlice[T, R any](
 	results := make([]ItemResult[R], len(items))
 
 	for i, item := range items {
-		i, item := i, item // capture for Spawn < 1.22
 		sp.Spawn(
 			fmt.Sprintf("map[%d]", i),
 			func(ctx context.Context, _ Spawner) error {

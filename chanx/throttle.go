@@ -10,6 +10,10 @@ import (
 // and one token is replenished every per/n interval. The output channel
 // is closed when in is closed or ctx is cancelled.
 //
+// Note: The first n items are sent immediately (initial burst), because
+// the token bucket starts full. Subsequent items are rate-limited to at
+// most n per duration period.
+//
 // Throttle panics if n is not positive or per is not positive.
 // If in is nil, returns a closed channel immediately.
 func Throttle[T any](ctx context.Context, in <-chan T, n int, per time.Duration) <-chan T {

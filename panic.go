@@ -25,15 +25,28 @@ func (e *PanicError) Error() string {
 	return fmt.Sprintf("panic: %v\n\n%s", e.Value, e.Stack)
 }
 
-// Unwrap returns nil. PanicError does not wrap another error.
-func (e *PanicError) Unwrap() error { return nil }
+// Unwrap returns the panic value as an error, if it implements the error
+// interface, or nil otherwise.
+func (e *PanicError) Unwrap() error {
+	if err, ok := e.Value.(error); ok {
+		return err
+	}
+	return nil
+}
 
 func newPanicError(v any) *PanicError {
-
-	buf := make([]byte, 8192)
-	n := runtime.Stack(buf, false)
+	// Grow buffer until the full stack fits.
+	var stack string
+	for size := 8192; ; size *= 2 {
+		buf := make([]byte, size)
+		n := runtime.Stack(buf, false)
+		if n < size {
+			stack = string(buf[:n])
+			break
+		}
+	}
 	return &PanicError{
 		Value: v,
-		Stack: string(buf[:n]),
+		Stack: stack,
 	}
 }

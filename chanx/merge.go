@@ -20,7 +20,6 @@ func Merge[T any](ctx context.Context, chs ...<-chan T) <-chan T {
 		if ch == nil {
 			continue // Skip nil channels
 		}
-		ch := ch // capture for Go < 1.22
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -56,6 +55,11 @@ func Merge[T any](ctx context.Context, chs ...<-chan T) <-chan T {
 //
 // If in is nil, all output channels are closed immediately.
 // This is useful for distributing work to a fixed set of workers.
+//
+// Note: Output channels have a buffer of 1. If any consumer is slow,
+// it blocks the entire round-robin distribution (head-of-line blocking).
+// Consider draining outputs concurrently to avoid stalls.
+//
 // FanOut panics if n is not positive.
 func FanOut[T any](ctx context.Context, in <-chan T, n int) []<-chan T {
 	if n <= 0 {

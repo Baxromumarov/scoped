@@ -87,6 +87,9 @@ func (s *scope) finalize() (error, *PanicError) {
 	s.finOnce.Do(func() {
 		s.wg.Wait()
 
+		// Check if context was cancelled externally (before cleanup).
+		ctxWasCancelled := s.ctx.Err() != nil
+
 		select {
 		case <-s.ctx.Done():
 		default:
@@ -117,6 +120,12 @@ func (s *scope) finalize() (error, *PanicError) {
 			}
 			s.errMu.Unlock()
 		}
+
+		// If no task errors were recorded but the context was cancelled
+		// externally (before scope cleanup), surface the context error.
+		if s.finErr == nil && ctxWasCancelled {
+			s.finErr = s.ctx.Err()
+		}
 	})
 
 	return s.finErr, s.finPanic
@@ -142,27 +151,27 @@ func (s *scope) exec(fn func(ctx context.Context) error) (err error) {
 
 // recordError records an error according to the configured policy.
 func (s *scope) recordError(taskInfo TaskInfo, err error) {
+	te := &TaskError{Task: taskInfo, Err: err}
 	switch s.cfg.policy {
 	case FailFast:
 		s.errOnce.Do(func() {
-			s.firstErr.Store(err)
+			s.firstErr.Store(te)
 			s.cancel(err)
 		})
 	case Collect:
 		s.errMu.Lock()
-		s.errs = append(s.errs, &TaskError{
-			Task: taskInfo,
-			Err:  err,
-		})
+		s.errs = append(s.errs, te)
 		s.errMu.Unlock()
 	}
 }
 
 // Scope, it wraps internal scope and provides the Spawner interface to users.
 type Scope struct {
-	s    *scope
-	root *spawner
-	once sync.Once
+	s        *scope
+	root     *spawner
+	once     sync.Once
+	result   error
+	panicVal *PanicError
 }
 
 // New creates a new Scope with the given parent context and options. It returns the Scope and
@@ -208,20 +217,15 @@ func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 }
 
 func (sc *Scope) Wait() error {
-	var (
-		result   error
-		panicErr *PanicError
-	)
-
 	sc.once.Do(func() {
 		sc.root.close()
-		result, panicErr = sc.s.finalize()
+		sc.result, sc.panicVal = sc.s.finalize()
 	})
 
-	if panicErr != nil {
-		panic(panicErr)
+	if sc.panicVal != nil {
+		panic(sc.panicVal)
 	}
-	return result
+	return sc.result
 }
 
 func (sc *Scope) Cancel(err error) {

@@ -1,8 +1,6 @@
 # scoped
 
-`scoped` is a small Spawn package for structured concurrency.
-
-It helps you run goroutines with a clear lifecycle: start tasks in a scope, wait for all of them, and handle cancellation/errors consistently.
+Structured concurrency primitives for Go — run goroutines with clear lifecycles, coordinated cancellation, and composable error handling.
 
 ## Install
 
@@ -10,94 +8,134 @@ It helps you run goroutines with a clear lifecycle: start tasks in a scope, wait
 go get github.com/baxromumarov/scoped
 ```
 
-## Quick Example
+## Core Concepts
+
+### `Run` — Scoped lifecycle
+
+`Run` creates a scope, executes your function, and waits for all spawned tasks:
 
 ```go
-package main
-
-import (
-	"context"
-	"fmt"
-	"time"
-
-	"github.com/baxromumarov/scoped"
-)
-
-func w1(ctx context.Context) error {
-	select {
-	case <-time.After(1 * time.Second):
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func w2(ctx context.Context) error {
-	select {
-	case <-time.After(1 * time.Second):
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
-func w3(ctx context.Context) error {
-	return fmt.Errorf("w3 failed")
-}
-
-func main() {
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-
-	arr := []func(context.Context) error{w3, w1, w2}
-
-	now := time.Now()
-
-	err := scoped.Run(
-		ctx,
-		func(sp scoped.Spawner) {
-			for idx, f := range arr {
-				f := f
-				sp.Spawn(
-					fmt.Sprintf("%d index", idx),
-					func(ctx context.Context, _ scoped.Spawner) error {
-						return f(ctx)
-					},
-				)
-			}
-		},
-		scoped.WithPolicy(scoped.FailFast),
-		scoped.WithPanicAsError(),
-	)
-
-	if err != nil {
-		fmt.Println("Final error:", err)
-	}
-
-	fmt.Println("Elapsed time:", time.Since(now))
-}
+err := scoped.Run(ctx, func(sp scoped.Spawner) {
+    sp.Spawn("fetch", func(ctx context.Context, _ scoped.Spawner) error {
+        return fetch(ctx)
+    })
+    sp.Spawn("process", func(ctx context.Context, _ scoped.Spawner) error {
+        return process(ctx)
+    })
+})
 ```
+
+### `New` / `Wait` — Manual lifecycle
+
+For cases where spawning happens outside a callback:
+
+```go
+sc, sp := scoped.New(ctx, scoped.WithPolicy(scoped.Collect))
+sp.Spawn("task", func(ctx context.Context, _ scoped.Spawner) error {
+    return doWork(ctx)
+})
+err := sc.Wait()
+```
+
+### Error Policies
+
+- **`FailFast`** (default) — First error cancels all siblings. `Wait()` returns that error.
+- **`Collect`** — All errors are collected. `Wait()` returns all via `errors.Join`.
+
+```go
+scoped.Run(ctx, fn, scoped.WithPolicy(scoped.Collect))
+```
+
+### Bounded Concurrency
+
+Limit the number of goroutines:
+
+```go
+scoped.Run(ctx, fn, scoped.WithLimit(10))
+```
+
+### Panic Recovery
+
+By default, panics are re-raised in `Wait()`. Use `WithPanicAsError()` to convert them to errors:
+
+```go
+scoped.Run(ctx, fn, scoped.WithPanicAsError())
+```
+
+## Helpers
+
+### `ForEachSlice` — Parallel iteration
+
+```go
+err := scoped.ForEachSlice(ctx, urls, func(ctx context.Context, u string) error {
+    return fetch(ctx, u)
+}, scoped.WithLimit(10))
+```
+
+### `MapSlice` — Parallel map with results
+
+```go
+results, err := scoped.MapSlice(ctx, items, func(ctx context.Context, item T) (R, error) {
+    return transform(ctx, item)
+}, scoped.WithLimit(5))
+```
+
+### `SpawnResult` — Typed async result
+
+```go
+r := scoped.SpawnResult(sp, "compute", func(ctx context.Context) (int, error) {
+    return expensiveCalc(ctx)
+})
+val, err := r.Wait()
+```
+
+## Streams
+
+Pull-based, composable data streams with parallel processing:
+
+```go
+err := scoped.Run(ctx, func(sp scoped.Spawner) {
+    stream := scoped.FromSlice(items).
+        Filter(func(v int) bool { return v > 0 }).
+        Take(100)
+
+    mapped := scoped.Map(stream, func(ctx context.Context, v int) (string, error) {
+        return fmt.Sprint(v), nil
+    })
+
+    results, _ := mapped.ToSlice(ctx)
+})
+```
+
+### `ParallelMap` — Concurrent stream transformation
+
+```go
+pm := scoped.ParallelMap(ctx, sp, src, scoped.StreamOptions{
+    MaxWorkers: 4,
+    Ordered:    true,
+}, transformFn)
+```
+
+## Channel Utilities (`chanx`)
+
+The `chanx` subpackage provides context-aware channel operations:
+
+| Function | Description |
+|----------|-------------|
+| `Send` / `Recv` | Context-aware send and receive |
+| `TrySend` / `TryRecv` | Non-blocking send and receive |
+| `SendBatch` / `RecvBatch` | Batch operations |
+| `Merge` | Fan-in: combine multiple channels |
+| `FanOut` | Distribute to N workers (round-robin) |
+| `Tee` | Broadcast to N consumers |
+| `Map` / `Filter` | Transform / filter pipelines |
+| `Throttle` | Rate-limit (token bucket) |
+| `Buffer` | Batch by size or timeout |
+| `First` | Race: first value from any channel |
+| `OrDone` | Wrap channel with context cancellation |
+| `Drain` | Discard remaining values |
+| `Closable` | Idempotent-close channel wrapper |
 
 ## License
 
-MIT License
-
-Copyright (c) 2026 Baxrom Umarov
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+MIT License — Copyright (c) 2026 Baxrom Umarov

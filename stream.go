@@ -227,6 +227,11 @@ func Batch[T any](s *Stream[T], n int) *Stream[[]T] {
 }
 
 // ParallelMap transforms a stream concurrently.
+//
+// Workers are managed internally and do NOT use sp.Spawn, so the results
+// channel can be consumed inside the same [Run] callback without deadlock.
+// The dispatcher goroutine IS spawned via sp.Spawn so it respects the
+// scope lifecycle.
 func ParallelMap[A, B any](
 	ctx context.Context,
 	sp Spawner,
@@ -259,12 +264,13 @@ func ParallelMap[A, B any](
 	}
 	out.next = makeParallelNext(out, opts, resCh)
 
-	sp.Spawn("parallel-map-dispatcher", func(taskCtx context.Context, sp Spawner) error {
+	sp.Spawn("parallel-map-dispatcher", func(taskCtx context.Context, _ Spawner) error {
 		defer close(resCh)
 
 		runCtx, runCancel := context.WithCancelCause(taskCtx)
-		defer runCancel(nil)
 
+		// Bridge: if the consumer calls stopNow() (which cancels mapCtx),
+		// propagate that into runCtx so workers and src.Next stop.
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
@@ -274,7 +280,11 @@ func ParallelMap[A, B any](
 			case <-runCtx.Done():
 			}
 		}()
+
+		// IMPORTANT: defers run LIFO, so register <-done BEFORE runCancel
+		// so that runCancel fires first, allowing the done goroutine to exit.
 		defer func() { <-done }()
+		defer runCancel(nil)
 
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, opts.MaxWorkers)
@@ -284,7 +294,13 @@ func ParallelMap[A, B any](
 			val, err := src.Next(runCtx)
 			if err != nil {
 				if err != io.EOF {
-					out.setError(err)
+					// If the cancellation was consumer-driven (stopNow/Take)
+					// and NOT from the parent context, don't surface it.
+					if ctx.Err() != nil {
+						out.setError(err) // external cancellation
+					} else if mapCtx.Err() == nil {
+						out.setError(err) // real source error
+					}
 				}
 				break
 			}
@@ -297,18 +313,24 @@ func ParallelMap[A, B any](
 			case <-runCtx.Done():
 				wg.Done()
 				wg.Wait()
-				return runCtx.Err()
-			}
-
-			sp.Spawn("parallel-map-worker", func(_ context.Context, _ Spawner) error {
-				defer func() { <-sem; wg.Done() }()
-				res, err := fn(runCtx, val)
-				select {
-				case resCh <- indexedResult[B]{idx: idx, val: res, err: err}:
-				case <-runCtx.Done():
+				// Consumer-driven cancellation (stopNow/Take) is not an error,
+				// but external context cancellation should propagate.
+				if ctx.Err() != nil {
+					return runCtx.Err()
 				}
 				return nil
-			})
+			}
+
+			// Workers use raw goroutines — NOT sp.Spawn — to avoid
+			// deadlocking when the consumer reads resCh inside Run.
+			go func() {
+				defer func() { <-sem; wg.Done() }()
+				res, fnErr := fn(runCtx, val)
+				select {
+				case resCh <- indexedResult[B]{idx: idx, val: res, err: fnErr}:
+				case <-runCtx.Done():
+				}
+			}()
 		}
 		wg.Wait()
 		return nil
@@ -442,9 +464,9 @@ func (s *Stream[T]) ForEach(ctx context.Context, fn func(T) error) error {
 }
 
 // ToChan sends all items in the stream to a channel.
-// Note: This spawns an unscoped goroutine. It is the caller's responsibility
-// to ensure the context is canceled or the channel is drained.
-// Use ToChanScope for structured concurrency.
+//
+// Deprecated: ToChan spawns an unscoped goroutine, which contradicts
+// structured concurrency guarantees. Use [Stream.ToChanScope] instead.
 func (s *Stream[T]) ToChan(ctx context.Context) (<-chan T, <-chan error) {
 	ch := make(chan T)
 	errCh := make(chan error, 1)

@@ -22,12 +22,12 @@ type spawner struct {
 // Spawn implements Spawner.Spawn.
 
 func (sp *spawner) Spawn(name string, fn TaskFunc) {
-	sp.s.wg.Add(1)
-
+	// Check open BEFORE wg.Add to avoid TOCTOU race with finalize()'s wg.Wait().
 	if !sp.open.Load() {
-		sp.s.wg.Done() // undo the Add for this task
 		panic("scoped: Spawn called after scope shutdown")
 	}
+
+	sp.s.wg.Add(1)
 
 	info := TaskInfo{Name: name}
 
@@ -40,18 +40,15 @@ func (sp *spawner) Spawn(name string, fn TaskFunc) {
 			case sp.s.sem <- struct{}{}:
 				defer func() { <-sp.s.sem }()
 			case <-sp.s.ctx.Done():
-				sp.s.recordError(info, sp.s.ctx.Err())
+				// Context cancelled while waiting for semaphore slot.
+				// Don't record as task error — the real cause is already recorded.
 				return
 			}
 		}
 
-		if err := sp.s.ctx.Err(); err != nil {
-			sp.s.recordError(info, err)
+		if sp.s.ctx.Err() != nil {
+			// Context already cancelled, skip execution silently.
 			return
-		}
-
-		if sp.s.cfg.onStart != nil {
-			sp.s.cfg.onStart(info)
 		}
 
 		//child spawner is valid only for the lifetime of the task;
@@ -63,14 +60,21 @@ func (sp *spawner) Spawn(name string, fn TaskFunc) {
 		child.open.Store(true)
 
 		start := time.Now()
+		// Hooks run inside exec() so panics are caught by recovery.
 		err := sp.s.exec(func(ctx context.Context) error {
-			return fn(ctx, child)
+			if sp.s.cfg.onStart != nil {
+				sp.s.cfg.onStart(info)
+			}
+			taskErr := fn(ctx, child)
+			return taskErr
 		})
 		elapsed := time.Since(start)
 
 		child.close()
 
 		if sp.s.cfg.onDone != nil {
+			// onDone runs outside exec — a panic here is intentionally
+			// unrecovered (observability hook must not panic).
 			sp.s.cfg.onDone(info, err, elapsed)
 		}
 

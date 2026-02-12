@@ -38,7 +38,6 @@ func TestNestedTasks(t *testing.T) {
 		context.Background(),
 		func(sp scoped.Spawner) {
 			for _, tk := range tasks {
-				tk := tk
 				sp.Spawn(
 					tk.name,
 					func(ctx context.Context, sp scoped.Spawner) error {
@@ -139,7 +138,6 @@ func TestRunFailFast(t *testing.T) {
 	sentinel := errors.New("task-3 failed")
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < 10; i++ {
-			i := i
 			sp.Spawn(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				if i == 3 {
 					return sentinel
@@ -193,7 +191,6 @@ func TestRunFailFastCancelsOthers(t *testing.T) {
 func TestRunCollect(t *testing.T) {
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < 5; i++ {
-			i := i
 			sp.Spawn(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				return fmt.Errorf("error-%d", i)
 			})
@@ -291,7 +288,6 @@ func TestRunMultiplePanicsFirstReRaised(t *testing.T) {
 
 	_ = scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		for i := 0; i < 5; i++ {
-			i := i
 			sp.Spawn(fmt.Sprintf("p-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				panic(fmt.Sprintf("panic-%d", i))
 			})
@@ -509,7 +505,6 @@ func TestHookPanicBehavior(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=^TestHookPanicBehavior$")
 			cmd.Env = append(os.Environ(), "SCOPED_HOOK_PANIC_MODE="+tc.mode)

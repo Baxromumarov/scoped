@@ -5,12 +5,13 @@ import "context"
 // Result holds the outcome of an asynchronous task that produces a typed
 // value. Create one via [SpawnResult].
 type Result[T any] struct {
-	ch chan result[T]
+	ch chan ResultValue[T]
 }
 
-type result[T any] struct {
-	val T
-	err error
+// ResultValue holds the value and error from a completed [Result] task.
+type ResultValue[T any] struct {
+	Val T
+	Err error
 }
 
 // SpawnResult spawns a named task that returns a typed value and wraps the
@@ -27,7 +28,7 @@ func SpawnResult[T any](
 	name string,
 	fn func(ctx context.Context) (T, error),
 ) *Result[T] {
-	r := &Result[T]{ch: make(chan result[T], 1)}
+	r := &Result[T]{ch: make(chan ResultValue[T], 1)}
 
 	sp.Spawn(name, func(ctx context.Context, _ Spawner) (err error) {
 		var v T
@@ -35,12 +36,12 @@ func SpawnResult[T any](
 		defer func() {
 			if rec := recover(); rec != nil {
 				var zero T
-				r.ch <- result[T]{val: zero, err: newPanicError(rec)}
+				r.ch <- ResultValue[T]{Val: zero, Err: newPanicError(rec)}
 				close(r.ch)
 				panic(rec)
 			}
 
-			r.ch <- result[T]{val: v, err: err}
+			r.ch <- ResultValue[T]{Val: v, Err: err}
 			close(r.ch)
 		}()
 
@@ -51,19 +52,12 @@ func SpawnResult[T any](
 	return r
 }
 
-// Wait blocks until the task completes.
-// It does not return early on scope cancellation.
-// It returns the task's value and error.
-//
-// Note: Since Spawner does not expose the scope's context, this Wait
-// only waits for the task to complete.
-
 func (r *Result[T]) Wait() (T, error) {
 	res := <-r.ch
-	return res.val, res.err
+	return res.Val, res.Err
 }
 
-// Done returns a channel that receives exactly one task result and then closes.
-func (r *Result[T]) Done() <-chan result[T] {
+// Done returns a channel that receives exactly one [ResultValue] and then closes.
+func (r *Result[T]) Done() <-chan ResultValue[T] {
 	return r.ch
 }

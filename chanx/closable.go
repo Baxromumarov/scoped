@@ -2,17 +2,21 @@ package chanx
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 )
 
+// errSentinel is an unexported type that prevents external reassignment.
+type errSentinel string
+
+func (e errSentinel) Error() string { return string(e) }
+
 // ErrClosed is returned by [Closable.Send] when the channel has been closed.
-var ErrClosed = errors.New("chanx: send on closed channel")
+const ErrClosed = errSentinel("chanx: send on closed channel")
 
 // ErrBuffFull is returned by [Closable.TrySend] when the channel is full
-// but trying to send more data
-var ErrBuffFull = errors.New("chanx: buffer is full")
+// but trying to send more data.
+const ErrBuffFull = errSentinel("chanx: buffer is full")
 
 // Closable wraps a channel with idempotent close and panic-safe send.
 //
@@ -110,9 +114,17 @@ func (c *Closable[T]) Close() {
 }
 
 // Chan returns the underlying channel for reading.
-// Note: This channel is NOT closed when Close() is called.
-// Use Done() in a select to detect closure, or range over Chan()
-// with a separate Done() check.
+//
+// WARNING: This channel is NOT closed when Close() is called. A consumer
+// using "for range c.Chan()" will block forever after Close(). Instead,
+// use Done() in a select statement to detect closure:
+//
+//	select {
+//	case v := <-c.Chan():
+//	    // process v
+//	case <-c.Done():
+//	    // channel was closed
+//	}
 func (c *Closable[T]) Chan() <-chan T {
 	return c.ch
 }

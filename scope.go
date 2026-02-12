@@ -16,7 +16,7 @@
 // Example usage:
 //
 //	sc, spawner := New(context.Background())
-//	spawner.Spawn(func(ctx context.Context, sp Spawner) error {
+//	spawner.Spawn("child", func(ctx context.Context, sp Spawner) error {
 //	    *task implementation is here*
 //	    return nil
 //	})
@@ -26,7 +26,6 @@ package scoped
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 )
 
@@ -65,10 +64,10 @@ func Run(parent context.Context, fn func(sp Spawner), opts ...Option) (err error
 
 	defer func() {
 		runPanic := recover()
-		waitErr, waitPanic := sc.s.finalize() // or sc.Wait(), but that panics on panicErr
 
-		// close root spawner regardless
+		// Stop accepting new root tasks before waiting for completion.
 		sc.root.close()
+		waitErr, waitPanic := sc.s.finalize() // or sc.Wait(), but that panics on panicErr
 
 		if runPanic != nil {
 			panic(runPanic)
@@ -108,7 +107,6 @@ func (s *scope) finalize() (error, *PanicError) {
 				s.finErr = v
 			}
 		case Collect:
-			fmt.Println(">>>>> here ")
 			s.errMu.Lock()
 			if len(s.errs) > 0 {
 				errs := make([]error, 0, len(s.errs))
@@ -152,7 +150,6 @@ func (s *scope) recordError(taskInfo TaskInfo, err error) {
 		})
 	case Collect:
 		s.errMu.Lock()
-		fmt.Println(">>> ", err)
 		s.errs = append(s.errs, &TaskError{
 			Task: taskInfo,
 			Err:  err,
@@ -161,7 +158,7 @@ func (s *scope) recordError(taskInfo TaskInfo, err error) {
 	}
 }
 
-// Scope , it wraps internal scope and provides the Spawner interface to users.
+// Scope, it wraps internal scope and provides the Spawner interface to users.
 type Scope struct {
 	s    *scope
 	root *spawner

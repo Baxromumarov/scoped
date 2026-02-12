@@ -1,4 +1,3 @@
-// ! Stream functionality isn't ready for production use.
 package scoped
 
 import (
@@ -21,9 +20,11 @@ var (
 // Note: Streams are single-consumer. Next() and other terminal methods
 // must not be called concurrently.
 type Stream[T any] struct {
-	next func(ctx context.Context) (T, error)
-	err  error
-	mu   sync.Mutex
+	next     func(ctx context.Context) (T, error)
+	err      error
+	stop     func()
+	stopOnce sync.Once
+	mu       sync.Mutex
 }
 
 // Next returns the next item in the stream.
@@ -54,7 +55,21 @@ func (s *Stream[T]) setError(err error) {
 	}
 }
 
+func (s *Stream[T]) stopNow() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		if s.stop != nil {
+			s.stop()
+		}
+	})
+}
+
 func (s *Stream[T]) Filter(fn func(T) bool) *Stream[T] {
+	if fn == nil {
+		panic("scoped: Filter requires non-nil predicate")
+	}
 	return &Stream[T]{
 		next: func(ctx context.Context) (T, error) {
 			for {
@@ -67,15 +82,20 @@ func (s *Stream[T]) Filter(fn func(T) bool) *Stream[T] {
 				}
 			}
 		},
+		stop: s.stopNow,
 	}
 }
 
 // Take limits the stream to n items.
 func (s *Stream[T]) Take(n int) *Stream[T] {
+	if n < 0 {
+		panic("scoped: Take requires n >= 0")
+	}
 	var idx int
 	return &Stream[T]{
 		next: func(ctx context.Context) (T, error) {
 			if idx >= n {
+				s.stopNow()
 				var zero T
 				return zero, io.EOF
 			}
@@ -86,6 +106,7 @@ func (s *Stream[T]) Take(n int) *Stream[T] {
 			idx++
 			return val, nil
 		},
+		stop: s.stopNow,
 	}
 }
 
@@ -98,6 +119,9 @@ type StreamOptions struct {
 
 // NewStream creates a new stream from an iterator function.
 func NewStream[T any](next func(context.Context) (T, error)) *Stream[T] {
+	if next == nil {
+		panic("scoped: NewStream requires non-nil next function")
+	}
 	return &Stream[T]{
 		next: next,
 	}
@@ -126,6 +150,10 @@ func FromSlice[T any](items []T) *Stream[T] {
 // FromChan creates a stream from a channel.
 func FromChan[T any](ch <-chan T) *Stream[T] {
 	return NewStream(func(ctx context.Context) (T, error) {
+		if ch == nil {
+			var zero T
+			return zero, io.EOF
+		}
 		select {
 		case <-ctx.Done():
 			var zero T
@@ -149,6 +177,12 @@ func FromFunc[T any](fn func(context.Context) (T, error)) *Stream[T] {
 // Note: This is a function and not a method because Go does not support
 // generic methods on generic types.
 func Map[A, B any](s *Stream[A], fn func(context.Context, A) (B, error)) *Stream[B] {
+	if s == nil {
+		panic("scoped: Map requires non-nil source stream")
+	}
+	if fn == nil {
+		panic("scoped: Map requires non-nil mapper")
+	}
 	return &Stream[B]{
 		next: func(ctx context.Context) (B, error) {
 			val, err := s.Next(ctx)
@@ -158,11 +192,18 @@ func Map[A, B any](s *Stream[A], fn func(context.Context, A) (B, error)) *Stream
 			}
 			return fn(ctx, val)
 		},
+		stop: s.stopNow,
 	}
 }
 
 // Batch groups items into slices of size n.
 func Batch[T any](s *Stream[T], n int) *Stream[[]T] {
+	if s == nil {
+		panic("scoped: Batch requires non-nil source stream")
+	}
+	if n <= 0 {
+		panic("scoped: Batch requires n > 0")
+	}
 	return &Stream[[]T]{
 		next: func(ctx context.Context) ([]T, error) {
 			var batch []T
@@ -181,6 +222,7 @@ func Batch[T any](s *Stream[T], n int) *Stream[[]T] {
 			}
 			return batch, nil
 		},
+		stop: s.stopNow,
 	}
 }
 
@@ -192,22 +234,54 @@ func ParallelMap[A, B any](
 	opts StreamOptions,
 	fn func(context.Context, A) (B, error),
 ) *Stream[B] {
+	if sp == nil {
+		panic("scoped: ParallelMap requires non-nil spawner")
+	}
+	if src == nil {
+		panic("scoped: ParallelMap requires non-nil source stream")
+	}
+	if fn == nil {
+		panic("scoped: ParallelMap requires non-nil mapper")
+	}
+	if opts.BufferSize < 0 {
+		panic("scoped: ParallelMap requires non-negative buffer size")
+	}
 	if opts.MaxWorkers <= 0 {
 		opts.MaxWorkers = runtime.NumCPU()
 	}
 
+	mapCtx, mapCancel := context.WithCancelCause(ctx)
 	resCh := make(chan indexedResult[B], opts.BufferSize+opts.MaxWorkers)
-	out := &Stream[B]{}
+	out := &Stream[B]{
+		stop: func() {
+			mapCancel(context.Canceled)
+		},
+	}
 	out.next = makeParallelNext(out, opts, resCh)
 
-	sp.Spawn("parallel-map-dispatcher", func(ctx context.Context, sp Spawner) error {
+	sp.Spawn("parallel-map-dispatcher", func(taskCtx context.Context, sp Spawner) error {
 		defer close(resCh)
+
+		runCtx, runCancel := context.WithCancelCause(taskCtx)
+		defer runCancel(nil)
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			select {
+			case <-mapCtx.Done():
+				runCancel(context.Cause(mapCtx))
+			case <-runCtx.Done():
+			}
+		}()
+		defer func() { <-done }()
+
 		var wg sync.WaitGroup
 		sem := make(chan struct{}, opts.MaxWorkers)
 		var inputIdx atomic.Int64
 
 		for {
-			val, err := src.Next(ctx)
+			val, err := src.Next(runCtx)
 			if err != nil {
 				if err != io.EOF {
 					out.setError(err)
@@ -220,16 +294,18 @@ func ParallelMap[A, B any](
 
 			select {
 			case sem <- struct{}{}:
-			case <-ctx.Done():
-				return ctx.Err()
+			case <-runCtx.Done():
+				wg.Done()
+				wg.Wait()
+				return runCtx.Err()
 			}
 
-			sp.Spawn("parallel-map-worker", func(ctx context.Context, _ Spawner) error {
+			sp.Spawn("parallel-map-worker", func(_ context.Context, _ Spawner) error {
 				defer func() { <-sem; wg.Done() }()
-				res, err := fn(ctx, val)
+				res, err := fn(runCtx, val)
 				select {
 				case resCh <- indexedResult[B]{idx: idx, val: res, err: err}:
-				case <-ctx.Done():
+				case <-runCtx.Done():
 				}
 				return nil
 			})
@@ -251,7 +327,7 @@ func makeParallelNext[B any](
 
 	return func(ctx context.Context) (B, error) {
 		for {
-			// If ordered, check heap first
+			// Ordered mode: emit only the next expected index.
 			if opts.Ordered && len(h) > 0 && h[0].idx == nextIdx {
 				res := heap.Pop(&h).(indexedResult[B])
 				nextIdx++
@@ -267,18 +343,18 @@ func makeParallelNext[B any](
 				return zero, ctx.Err()
 			case res, ok := <-resCh:
 				if !ok {
-					// resCh is closed. Drain the heap if ordered.
-					if opts.Ordered && len(h) > 0 {
-						// First check if the next expected index is available
-						if h[0].idx == nextIdx {
-							res := heap.Pop(&h).(indexedResult[B])
-							nextIdx++
-							if res.err != nil && res.err != io.EOF {
-								out.setError(res.err)
-							}
-							return res.val, res.err
-						}
-						// If not at nextIdx but we have items, check if any have errors.
+					if !opts.Ordered {
+						var zero B
+						return zero, io.EOF
+					}
+					if len(h) == 0 {
+						var zero B
+						return zero, io.EOF
+					}
+					// Channel closed while we still have buffered out-of-order results.
+					// If there is no next expected item, report the first available error,
+					// otherwise report a gap.
+					if h[0].idx != nextIdx {
 						for len(h) > 0 {
 							res := heap.Pop(&h).(indexedResult[B])
 							if res.err != nil {
@@ -286,13 +362,13 @@ func makeParallelNext[B any](
 								return res.val, res.err
 							}
 						}
-						// If we reach here, we have a gap and no errors in heap.
 						out.setError(ErrStreamGap)
 						var zero B
 						return zero, ErrStreamGap
 					}
+					out.setError(ErrStreamGap)
 					var zero B
-					return zero, io.EOF
+					return zero, ErrStreamGap
 				}
 
 				if !opts.Ordered {
@@ -331,6 +407,7 @@ func (h *indexedResultHeap[T]) Pop() any {
 
 // ToSlice collects all items in the stream into a slice.
 func (s *Stream[T]) ToSlice(ctx context.Context) ([]T, error) {
+	defer s.stopNow()
 	var items []T
 	for {
 		val, err := s.Next(ctx)
@@ -346,6 +423,10 @@ func (s *Stream[T]) ToSlice(ctx context.Context) ([]T, error) {
 
 // ForEach applies a function to each item in the stream.
 func (s *Stream[T]) ForEach(ctx context.Context, fn func(T) error) error {
+	if fn == nil {
+		panic("scoped: ForEach requires non-nil callback")
+	}
+	defer s.stopNow()
 	for {
 		val, err := s.Next(ctx)
 		if err == io.EOF {
@@ -368,6 +449,7 @@ func (s *Stream[T]) ToChan(ctx context.Context) (<-chan T, <-chan error) {
 	ch := make(chan T)
 	errCh := make(chan error, 1)
 	go func() {
+		defer s.stopNow()
 		defer close(ch)
 		defer close(errCh)
 		for {
@@ -395,9 +477,13 @@ func (s *Stream[T]) ToChan(ctx context.Context) (<-chan T, <-chan error) {
 // The goroutine is managed by the scope and will stop when the stream is exhausted
 // or the scope is canceled.
 func (s *Stream[T]) ToChanScope(sp Spawner) (<-chan T, <-chan error) {
+	if sp == nil {
+		panic("scoped: ToChanScope requires non-nil spawner")
+	}
 	ch := make(chan T)
 	errCh := make(chan error, 1)
 	sp.Spawn("stream-to-chan", func(ctx context.Context, _ Spawner) error {
+		defer s.stopNow()
 		defer close(ch)
 		defer close(errCh)
 		for {
@@ -428,33 +514,46 @@ func (s *Stream[T]) Collect(ctx context.Context) ([]T, error) {
 
 // Skip skips the first n items in the stream.
 func (s *Stream[T]) Skip(n int) *Stream[T] {
+	if n < 0 {
+		panic("scoped: Skip requires n >= 0")
+	}
 	var skipped int
-	return NewStream(func(ctx context.Context) (T, error) {
-		for skipped < n {
-			_, err := s.Next(ctx)
-			if err != nil {
-				var zero T
-				return zero, err
+	return &Stream[T]{
+		next: func(ctx context.Context) (T, error) {
+			for skipped < n {
+				_, err := s.Next(ctx)
+				if err != nil {
+					var zero T
+					return zero, err
+				}
+				skipped++
 			}
-			skipped++
-		}
-		return s.Next(ctx)
-	})
+			return s.Next(ctx)
+		},
+		stop: s.stopNow,
+	}
 }
 
 // Peek allows inspecting items as they pass through the stream.
 func (s *Stream[T]) Peek(fn func(T)) *Stream[T] {
-	return NewStream(func(ctx context.Context) (T, error) {
-		val, err := s.Next(ctx)
-		if err == nil {
-			fn(val)
-		}
-		return val, err
-	})
+	if fn == nil {
+		panic("scoped: Peek requires non-nil callback")
+	}
+	return &Stream[T]{
+		next: func(ctx context.Context) (T, error) {
+			val, err := s.Next(ctx)
+			if err == nil {
+				fn(val)
+			}
+			return val, err
+		},
+		stop: s.stopNow,
+	}
 }
 
 // Count counts the number of items in the stream.
 func (s *Stream[T]) Count(ctx context.Context) (int, error) {
+	defer s.stopNow()
 	var count int
 	for {
 		_, err := s.Next(ctx)
@@ -462,7 +561,7 @@ func (s *Stream[T]) Count(ctx context.Context) (int, error) {
 			return count, s.Err()
 		}
 		if err != nil {
-			return 0, err
+			return count, err
 		}
 		count++
 	}

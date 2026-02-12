@@ -8,11 +8,11 @@
 // function that spawns tasks via [Scope.Spawn], and waits for all tasks to
 // complete before returning:
 //
-//	err := scoped.Run(ctx, func(s *scoped.Scope) {
-//	    s.Spawn("fetch", func(ctx context.Context) error {
+//	err := scoped.Run(ctx, func(sp scoped.Spawner) {
+//	    sp.Spawn("fetch", func(ctx context.Context, _ scoped.Spawner) error {
 //	        return fetch(ctx)
 //	    })
-//	    s.Spawn("process", func(ctx context.Context) error {
+//	    sp.Spawn("process", func(ctx context.Context, _ scoped.Spawner) error {
 //	        return process(ctx)
 //	    })
 //	})

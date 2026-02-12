@@ -609,6 +609,32 @@ func TestGoResultPanic(t *testing.T) {
 	}
 }
 
+func TestGoResultPanicWithoutPanicAsError(t *testing.T) {
+	var r *scoped.Result[int]
+	p := capturePanic(func() {
+		_ = scoped.Run(
+			context.Background(),
+			func(sp scoped.Spawner) {
+				r = scoped.SpawnResult(sp, "compute", func(ctx context.Context) (int, error) {
+					panic("boom")
+				})
+			},
+		)
+	})
+	if p == nil {
+		t.Fatal("expected panic")
+	}
+
+	_, rerr := r.Wait()
+	var pe *scoped.PanicError
+	if !errors.As(rerr, &pe) {
+		t.Fatalf("expected PanicError from result, got %T: %v", rerr, rerr)
+	}
+	if pe.Value != "boom" {
+		t.Fatalf("expected panic value boom, got %v", pe.Value)
+	}
+}
+
 func TestForEach(t *testing.T) {
 	items := []int{1, 2, 3, 4, 5}
 	var sum atomic.Int64

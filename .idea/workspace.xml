@@ -6,10 +6,6 @@
   <component name="ChangeListManager">
     <list default="true" id="e0d7732d-856b-4d46-b674-b769a6c96484" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/chanx/closable_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/chanx/closable_test.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/helpers.go" beforeDir="false" afterPath="$PROJECT_DIR$/helpers.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scope.go" beforeDir="false" afterPath="$PROJECT_DIR$/scope.go" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/scope_test.go" beforeDir="false" afterPath="$PROJECT_DIR$/scope_test.go" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -64,12 +60,15 @@
   <component name="PropertiesComponent"><![CDATA[{
   "keyToString": {
     "DefaultGoTemplateProperty": "Go File",
+    "Go Test.TestAtomicError in github.com/baxromumarov/scoped.executor": "Run",
     "Go Test.TestClosable_Send in github.com/baxromumarov/scoped/chanx.executor": "Run",
     "Go Test.TestClosable_SendAfterClose in github.com/baxromumarov/scoped/chanx.executor": "Run",
     "Go Test.TestClosable_SendBlocksWhenFull in github.com/baxromumarov/scoped/chanx.executor": "Run",
     "Go Test.TestClosable_SendConcurrent in github.com/baxromumarov/scoped/chanx.executor": "Run",
     "Go Test.TestClosable_TrySend in github.com/baxromumarov/scoped/chanx.executor": "Run",
     "Go Test.TestClosable_TrySendWithClose in github.com/baxromumarov/scoped/chanx.executor": "Run",
+    "Go Test.TestForEachSlice in github.com/baxromumarov/scoped.executor": "Run",
+    "Go Test.TestMapSlice in github.com/baxromumarov/scoped.executor": "Run",
     "Go Test.TestMapSlice/error_with_Collect_partial_results in github.com/baxromumarov/scoped.executor": "Run",
     "Go Test.TestMerge_NoChannels in github.com/baxromumarov/scoped/chanx.executor": "Run",
     "Go Test.TestSend in github.com/baxromumarov/scoped/chanx.executor": "Run",
@@ -101,29 +100,38 @@
     "to.speed.mode.migration.done": "true"
   }
 }]]></component>
-  <component name="RunManager" selected="Go Test.TestMapSlice/error_with_Collect_partial_results in github.com/baxromumarov/scoped">
-    <configuration name="TestClosable_SendBlocksWhenFull in github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+  <component name="RunManager" selected="Go Test.TestForEachSlice in github.com/baxromumarov/scoped">
+    <configuration name="TestAtomicError in github.com/baxromumarov/scoped" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
       <module name="scoped" />
-      <working_directory value="$PROJECT_DIR$/chanx" />
-      <root_directory value="$PROJECT_DIR$" />
+      <working_directory value="$PROJECT_DIR$" />
       <kind value="PACKAGE" />
-      <package value="github.com/baxromumarov/scoped/chanx" />
+      <package value="github.com/baxromumarov/scoped" />
       <directory value="$PROJECT_DIR$" />
       <filePath value="$PROJECT_DIR$" />
       <framework value="gotest" />
-      <pattern value="^\QTestClosable_SendBlocksWhenFull\E$" />
+      <pattern value="^\QTestAtomicError\E$" />
       <method v="2" />
     </configuration>
-    <configuration name="TestClosable_SendConcurrent in github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+    <configuration name="TestForEachSlice in github.com/baxromumarov/scoped" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
       <module name="scoped" />
-      <working_directory value="$PROJECT_DIR$/chanx" />
-      <root_directory value="$PROJECT_DIR$" />
+      <working_directory value="$PROJECT_DIR$" />
       <kind value="PACKAGE" />
-      <package value="github.com/baxromumarov/scoped/chanx" />
+      <package value="github.com/baxromumarov/scoped" />
       <directory value="$PROJECT_DIR$" />
       <filePath value="$PROJECT_DIR$" />
       <framework value="gotest" />
-      <pattern value="^\QTestClosable_SendConcurrent\E$" />
+      <pattern value="^\QTestForEachSlice\E$" />
+      <method v="2" />
+    </configuration>
+    <configuration name="TestMapSlice in github.com/baxromumarov/scoped" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
+      <module name="scoped" />
+      <working_directory value="$PROJECT_DIR$" />
+      <kind value="PACKAGE" />
+      <package value="github.com/baxromumarov/scoped" />
+      <directory value="$PROJECT_DIR$" />
+      <filePath value="$PROJECT_DIR$" />
+      <framework value="gotest" />
+      <pattern value="^\QTestMapSlice\E$" />
       <method v="2" />
     </configuration>
     <configuration name="TestMapSlice/error_with_Collect_partial_results in github.com/baxromumarov/scoped" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
@@ -148,24 +156,13 @@
       <pattern value="^\QTest_ForEachSlice_Basics\E$/^\Qwithout_options,_calculate_squares\E$" />
       <method v="2" />
     </configuration>
-    <configuration name="go test github.com/baxromumarov/scoped/chanx" type="GoTestRunConfiguration" factoryName="Go Test" temporary="true" nameIsGenerated="true">
-      <module name="scoped" />
-      <working_directory value="$PROJECT_DIR$/chanx" />
-      <root_directory value="$PROJECT_DIR$" />
-      <kind value="PACKAGE" />
-      <package value="github.com/baxromumarov/scoped/chanx" />
-      <directory value="$PROJECT_DIR$" />
-      <filePath value="$PROJECT_DIR$" />
-      <framework value="gotest" />
-      <method v="2" />
-    </configuration>
     <recent_temporary>
       <list>
+        <item itemvalue="Go Test.TestForEachSlice in github.com/baxromumarov/scoped" />
+        <item itemvalue="Go Test.TestAtomicError in github.com/baxromumarov/scoped" />
+        <item itemvalue="Go Test.TestMapSlice in github.com/baxromumarov/scoped" />
         <item itemvalue="Go Test.TestMapSlice/error_with_Collect_partial_results in github.com/baxromumarov/scoped" />
         <item itemvalue="Go Test.Test_ForEachSlice_Basics/without_options,_calculate_squares in github.com/baxromumarov/scoped" />
-        <item itemvalue="Go Test.go test github.com/baxromumarov/scoped/chanx" />
-        <item itemvalue="Go Test.TestClosable_SendConcurrent in github.com/baxromumarov/scoped/chanx" />
-        <item itemvalue="Go Test.TestClosable_SendBlocksWhenFull in github.com/baxromumarov/scoped/chanx" />
       </list>
     </recent_temporary>
   </component>

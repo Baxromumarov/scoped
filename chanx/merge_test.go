@@ -109,8 +109,11 @@ func TestMerge_ContextCancellationAfterValues(t *testing.T) {
 	// Cancel context
 	cancel()
 
-	// Output channel should be closed
+	// One in-flight value may still be delivered; then channel must close.
 	_, ok = <-out
+	if ok {
+		_, ok = <-out
+	}
 	assert.False(t, ok)
 }
 

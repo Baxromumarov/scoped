@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,9 +70,9 @@ func TestForEachSlice(t *testing.T) {
 	})
 
 	t.Run("error with FailFast", func(t *testing.T) {
-		called := 0
+		var called atomic.Int32
 		err := ForEachSlice(context.Background(), []int{1, 2, 3}, func(ctx context.Context, item int) error {
-			called++
+			called.Add(1)
 			if item == 2 {
 				return errors.New("error on 2")
 			}
@@ -84,15 +85,15 @@ func TestForEachSlice(t *testing.T) {
 			t.Errorf("expected 'error on 2', got %v", err)
 		}
 		// With FailFast, may not call all
-		if called < 1 || called > 3 {
-			t.Errorf("unexpected call count %d", called)
+		if got := called.Load(); got < 1 || got > 3 {
+			t.Errorf("unexpected call count %d", got)
 		}
 	})
 
 	t.Run("error with Collect", func(t *testing.T) {
-		called := 0
+		var called atomic.Int32
 		err := ForEachSlice(context.Background(), []int{1, 2, 3}, func(ctx context.Context, item int) error {
-			called++
+			called.Add(1)
 			if item == 2 {
 				return errors.New("error on 2")
 			}
@@ -105,8 +106,8 @@ func TestForEachSlice(t *testing.T) {
 		if !strings.Contains(err.Error(), "error on 2") {
 			t.Errorf("expected error containing 'error on 2', got %v", err)
 		}
-		if called != 3 {
-			t.Errorf("expected 3 calls, got %d", called)
+		if got := called.Load(); got != 3 {
+			t.Errorf("expected 3 calls, got %d", got)
 		}
 	})
 

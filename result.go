@@ -29,25 +29,22 @@ func SpawnResult[T any](
 ) *Result[T] {
 	r := &Result[T]{ch: make(chan result[T], 1)}
 
-	sp.Spawn(name, func(ctx context.Context, _ Spawner) error {
-		var zero T
+	sp.Spawn(name, func(ctx context.Context, _ Spawner) (err error) {
+		var v T
 
-		// exec already converts panic → error when WithPanicAsError is set
-		err := sp.(*spawner).s.exec(func(ctx context.Context) error {
-			v, err := fn(ctx)
-			r.ch <- result[T]{v, err}
-			return err
-		})
-
-		// If panic occurred, exec returned a PanicError,
-		// but the result was never published
-		if err != nil {
-			select {
-			case r.ch <- result[T]{zero, err}:
-			default:
+		defer func() {
+			if rec := recover(); rec != nil {
+				var zero T
+				r.ch <- result[T]{val: zero, err: newPanicError(rec)}
+				close(r.ch)
+				panic(rec)
 			}
-		}
 
+			r.ch <- result[T]{val: v, err: err}
+			close(r.ch)
+		}()
+
+		v, err = fn(ctx)
 		return err
 	})
 
@@ -66,7 +63,7 @@ func (r *Result[T]) Wait() (T, error) {
 	return res.val, res.err
 }
 
-// Done returns a channel that is closed when the task completes.
+// Done returns a channel that receives exactly one task result and then closes.
 func (r *Result[T]) Done() <-chan result[T] {
 	return r.ch
 }

@@ -17,7 +17,7 @@ func BenchmarkRunNoWork(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
-					for j := 0; j < n; j++ {
+					for range n {
 						s.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 							return nil
 						})
@@ -53,7 +53,7 @@ func BenchmarkRawGoroutineWaitGroup(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				var wg sync.WaitGroup
-				for j := 0; j < n; j++ {
+				for range n {
 					wg.Add(1)
 					go func() {
 						defer wg.Done()
@@ -71,8 +71,7 @@ func BenchmarkGoResult(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		var results [10]*scoped.Result[int]
 		_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
-			for j := 0; j < 10; j++ {
-				j := j
+			for j := range 10 {
 				results[j] = scoped.SpawnResult(s, "", func(ctx context.Context) (int, error) {
 					return j * 2, nil
 				})

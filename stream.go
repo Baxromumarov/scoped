@@ -1,7 +1,6 @@
 package scoped
 
 import (
-	"container/heap"
 	"context"
 	"fmt"
 	"io"
@@ -345,18 +344,22 @@ func makeParallelNext[B any](
 	resCh chan indexedResult[B],
 ) func(context.Context) (B, error) {
 	var nextIdx int64
-	var h indexedResultHeap[B]
+	// For ordered mode, buffer out-of-order results in a map keyed by index.
+	// This avoids heap allocations (heap.Push/Pop box into any).
+	pending := make(map[int64]indexedResult[B])
 
 	return func(ctx context.Context) (B, error) {
 		for {
-			// Ordered mode: emit only the next expected index.
-			if opts.Ordered && len(h) > 0 && h[0].idx == nextIdx {
-				res := heap.Pop(&h).(indexedResult[B])
-				nextIdx++
-				if res.err != nil && res.err != io.EOF {
-					out.setError(res.err)
+			// Ordered mode: emit the next expected index if buffered.
+			if opts.Ordered {
+				if res, ok := pending[nextIdx]; ok {
+					delete(pending, nextIdx)
+					nextIdx++
+					if res.err != nil && res.err != io.EOF {
+						out.setError(res.err)
+					}
+					return res.val, res.err
 				}
-				return res.val, res.err
 			}
 
 			select {
@@ -369,16 +372,19 @@ func makeParallelNext[B any](
 						var zero B
 						return zero, io.EOF
 					}
-					if len(h) == 0 {
-						var zero B
-						return zero, io.EOF
+					// Channel closed — drain any remaining buffered results.
+					if res, ok := pending[nextIdx]; ok {
+						delete(pending, nextIdx)
+						nextIdx++
+						if res.err != nil && res.err != io.EOF {
+							out.setError(res.err)
+						}
+						return res.val, res.err
 					}
-					// Channel closed while we still have buffered out-of-order results.
-					// If there is no next expected item, report the first available error,
-					// otherwise report a gap.
-					if h[0].idx != nextIdx {
-						for len(h) > 0 {
-							res := heap.Pop(&h).(indexedResult[B])
+					if len(pending) > 0 {
+						// Out-of-order items remain but not nextIdx — gap.
+						// Return the first embedded error if any, else ErrStreamGap.
+						for _, res := range pending {
 							if res.err != nil {
 								out.setError(res.err)
 								return res.val, res.err
@@ -388,9 +394,8 @@ func makeParallelNext[B any](
 						var zero B
 						return zero, ErrStreamGap
 					}
-					out.setError(ErrStreamGap)
 					var zero B
-					return zero, ErrStreamGap
+					return zero, io.EOF
 				}
 
 				if !opts.Ordered {
@@ -400,8 +405,8 @@ func makeParallelNext[B any](
 					return res.val, res.err
 				}
 
-				// Ordered: push to heap and retry
-				heap.Push(&h, res)
+				// Ordered: buffer and loop to check if nextIdx is ready.
+				pending[res.idx] = res
 			}
 		}
 	}
@@ -411,20 +416,6 @@ type indexedResult[T any] struct {
 	idx int64
 	val T
 	err error
-}
-
-type indexedResultHeap[T any] []indexedResult[T]
-
-func (h indexedResultHeap[T]) Len() int           { return len(h) }
-func (h indexedResultHeap[T]) Less(i, j int) bool { return h[i].idx < h[j].idx }
-func (h indexedResultHeap[T]) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *indexedResultHeap[T]) Push(x any)        { *h = append(*h, x.(indexedResult[T])) }
-func (h *indexedResultHeap[T]) Pop() any {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[:n-1]
-	return x
 }
 
 // ToSlice collects all items in the stream into a slice.
@@ -461,38 +452,6 @@ func (s *Stream[T]) ForEach(ctx context.Context, fn func(T) error) error {
 			return err
 		}
 	}
-}
-
-// ToChan sends all items in the stream to a channel.
-//
-// Deprecated: ToChan spawns an unscoped goroutine, which contradicts
-// structured concurrency guarantees. Use [Stream.ToChanScope] instead.
-func (s *Stream[T]) ToChan(ctx context.Context) (<-chan T, <-chan error) {
-	ch := make(chan T)
-	errCh := make(chan error, 1)
-	go func() {
-		defer s.stopNow()
-		defer close(ch)
-		defer close(errCh)
-		for {
-			val, err := s.Next(ctx)
-			if err == io.EOF {
-				errCh <- s.Err()
-				return
-			}
-			if err != nil {
-				errCh <- err
-				return
-			}
-			select {
-			case ch <- val:
-			case <-ctx.Done():
-				errCh <- ctx.Err()
-				return
-			}
-		}
-	}()
-	return ch, errCh
 }
 
 // ToChanScope sends all items in the stream to a channel within a Scope.

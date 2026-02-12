@@ -471,51 +471,6 @@ func TestStopPropagationAndStopOnce(t *testing.T) {
 	}
 }
 
-func TestToChanBranches(t *testing.T) {
-	t.Run("success", func(t *testing.T) {
-		out, errCh := FromSlice([]int{1, 2, 3}).ToChan(context.Background())
-		var got []int
-		for v := range out {
-			got = append(got, v)
-		}
-		if !reflect.DeepEqual(got, []int{1, 2, 3}) {
-			t.Fatalf("unexpected values: %v", got)
-		}
-		if err := <-errCh; err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("source error", func(t *testing.T) {
-		sentinel := errors.New("boom")
-		s := NewStream(func(ctx context.Context) (int, error) {
-			return 0, sentinel
-		})
-		out, errCh := s.ToChan(context.Background())
-		if _, ok := <-out; ok {
-			t.Fatal("expected closed output channel")
-		}
-		if err := <-errCh; !errors.Is(err, sentinel) {
-			t.Fatalf("expected %v, got %v", sentinel, err)
-		}
-	})
-
-	t.Run("context cancellation while sending", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		s := NewStream(func(ctx context.Context) (int, error) {
-			return 1, nil
-		})
-		out, errCh := s.ToChan(ctx)
-		cancel()
-		if err := <-errCh; !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected context canceled, got %v", err)
-		}
-		if _, ok := <-out; ok {
-			t.Fatal("expected closed output channel")
-		}
-	})
-}
-
 func TestToChanScopeBranches(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		var (

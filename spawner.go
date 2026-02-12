@@ -59,7 +59,13 @@ func (sp *spawner) Spawn(name string, fn TaskFunc) {
 		}
 		child.open.Store(true)
 
-		start := time.Now()
+		hasOnDone := sp.s.cfg.onDone != nil
+
+		var start time.Time
+		if hasOnDone {
+			start = time.Now()
+		}
+
 		// Hooks run inside exec() so panics are caught by recovery.
 		err := sp.s.exec(func(ctx context.Context) error {
 			if sp.s.cfg.onStart != nil {
@@ -68,14 +74,11 @@ func (sp *spawner) Spawn(name string, fn TaskFunc) {
 			taskErr := fn(ctx, child)
 			return taskErr
 		})
-		elapsed := time.Since(start)
 
 		child.close()
 
-		if sp.s.cfg.onDone != nil {
-			// onDone runs outside exec — a panic here is intentionally
-			// unrecovered (observability hook must not panic).
-			sp.s.cfg.onDone(info, err, elapsed)
+		if hasOnDone {
+			sp.s.cfg.onDone(info, err, time.Since(start))
 		}
 
 		if err != nil {

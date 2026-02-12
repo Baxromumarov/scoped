@@ -646,9 +646,12 @@ func TestMap(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	expected := []int{2, 4, 6, 8, 10}
-	for i, v := range results {
-		if v != expected[i] {
-			t.Fatalf("results[%d] = %d, want %d", i, v, expected[i])
+	for i := range results {
+		if results[i].Err != nil {
+			t.Fatalf("results[%d] err = %v, want nil", i, results[i].Err)
+		}
+		if results[i].Value != expected[i] {
+			t.Fatalf("results[%d] = %d, want %d", i, results[i].Value, expected[i])
 		}
 	}
 }

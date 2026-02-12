@@ -26,6 +26,7 @@ package scoped
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 )
 
@@ -107,6 +108,7 @@ func (s *scope) finalize() (error, *PanicError) {
 				s.finErr = v
 			}
 		case Collect:
+			fmt.Println(">>>>> here ")
 			s.errMu.Lock()
 			if len(s.errs) > 0 {
 				errs := make([]error, 0, len(s.errs))
@@ -150,6 +152,7 @@ func (s *scope) recordError(taskInfo TaskInfo, err error) {
 		})
 	case Collect:
 		s.errMu.Lock()
+		fmt.Println(">>> ", err)
 		s.errs = append(s.errs, &TaskError{
 			Task: taskInfo,
 			Err:  err,
@@ -158,7 +161,7 @@ func (s *scope) recordError(taskInfo TaskInfo, err error) {
 	}
 }
 
-// Public Sope, it wraps internal scope and provides the Spawner interface to users.
+// Scope , it wraps internal scope and provides the Spawner interface to users.
 type Scope struct {
 	s    *scope
 	root *spawner

@@ -489,7 +489,7 @@ func TestClosable_RaceConditions(t *testing.T) {
 			wg.Add(1)
 			go func(val int) {
 				defer wg.Done()
-				c.TrySend(val)
+				_ = c.TrySend(val)
 			}(i)
 		}
 

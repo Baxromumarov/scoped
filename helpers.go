@@ -26,7 +26,7 @@ func ForEachSlice[T any](
 			for i, item := range items {
 				item := item // capture for Spawn < 1.22
 				sp.Spawn(
-					fmt.Sprintf("foreach[%d]", i),
+					fmt.Sprintf("for-each [%d]", i),
 					func(ctx context.Context, _ Spawner) error {
 						return fn(ctx, item)
 					},
@@ -37,61 +37,82 @@ func ForEachSlice[T any](
 	)
 }
 
+// ItemResult holds the outcome of processing an individual item in [MapSlice].
+// In [Collect] mode, function-level failures are captured in Err and successful
+// items still have Value populated.
+type ItemResult[R any] struct {
+	Value R
+	Err   error
+}
+
 // MapSlice executes fn for each item concurrently and collects the results
-// in the same order as the input slice. It uses [FailFast] policy by
-// default; pass [WithPolicy]([Collect]) to gather partial results.
+// in the same order as the input slice. It uses [FailFast] policy by default;
+// pass [Collect] Policy to gather partial results and errors that happened during execution.
 //
-// On error, MapSlice returns nil and the error. On success, it returns the
-// results slice and nil.
+// Result semantics:
 //
-//	prices, err := scoped.MapSlice(ctx, products, func(ctx context.Context, p Product) (float64, error) {
-//	    return fetchPrice(ctx, p)
-//	}, scoped.WithLimit(5))
+//   - [FailFast]: the first function error fails the whole call and MapSlice
+//     returns nil results with that error.
+//
+//   - [Collect]: function errors are captured per item in [ItemResult.Err],
+//     and MapSlice still returns the partial results slice.
+//
+//   - The outer returned error is reserved for scope/infrastructure failures
+//     (for example context cancellation, panic-as-error, etc.).
+//
+//     prices, err := scoped.MapSlice(ctx, products, func(ctx context.Context, p Product) (float64, error) {
+//     return fetchPrice(ctx, p)
+//     }, scoped.WithLimit(5))
 func MapSlice[T, R any](
 	ctx context.Context,
 	items []T,
 	fn func(ctx context.Context, item T) (R, error),
 	opts ...Option,
 ) (
-	[]R,
+	[]ItemResult[R],
 	error,
 ) {
-	results := make([]R, len(items))
-	err := Run(
-		ctx,
-		func(sp Spawner) {
-			for i, item := range items {
-				i, item := i, item // capture for Spawn < 1.22
-				sp.Spawn(
-					fmt.Sprintf("map[%d]", i),
-					func(ctx context.Context, _ Spawner) error {
-						r, err := fn(ctx, item)
-						if err != nil {
-							return err
-						}
-						results[i] = r // safe: each goroutine writes a unique index
+	sc, sp := New(ctx, opts...)
+	policy := sc.s.cfg.policy
+	results := make([]ItemResult[R], len(items))
+
+	for i, item := range items {
+		i, item := i, item // capture for Spawn < 1.22
+		sp.Spawn(
+			fmt.Sprintf("map[%d]", i),
+			func(ctx context.Context, _ Spawner) error {
+				r, err := fn(ctx, item)
+				if err != nil {
+					results[i].Err = err // safe: each goroutine writes a unique index
+					if policy == Collect {
 						return nil
-					},
-				)
-			}
-		},
-		opts...,
-	)
+					}
+					return err
+				}
+				results[i].Value = r // safe: each goroutine writes a unique index
+				return nil
+			},
+		)
+	}
+
+	err := sc.Wait()
 	if err != nil {
-		return nil, err
+		if policy == FailFast {
+			return nil, err
+		}
+		return results, err
 	}
 	return results, nil
 }
 
 type atomicError struct{ v atomic.Value }
 
+type storedError struct {
+	err error
+}
+
 func (a *atomicError) Store(err error) {
-	if err == nil {
-		// atomic.Value cannot Store(nil), so store a typed nil marker if you want
-		a.v.Store((error)(nil))
-		return
-	}
-	a.v.Store(err)
+	a.v.Store(storedError{err: err})
 }
 
 func (a *atomicError) Load() error {
@@ -99,5 +120,5 @@ func (a *atomicError) Load() error {
 	if v == nil {
 		return nil
 	}
-	return v.(error)
+	return v.(storedError).err
 }

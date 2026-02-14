@@ -34,6 +34,7 @@ func (s *Stream[T]) Next(ctx context.Context) (T, error) {
 	if err != nil && err != io.EOF {
 		s.setError(err)
 	}
+
 	return val, err
 }
 
@@ -48,9 +49,10 @@ func (s *Stream[T]) setError(err error) {
 	if err == nil || err == io.EOF {
 		return
 	}
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.err = errors.Join(s.err, err)
+	s.mu.Unlock()
 }
 
 func (s *Stream[T]) stopNow() {
@@ -82,6 +84,7 @@ func (s *Stream[T]) Filter(fn func(T) bool) *Stream[T] {
 				if err != nil {
 					return val, err
 				}
+
 				if fn(val) {
 					return val, nil
 				}
@@ -96,7 +99,9 @@ func (s *Stream[T]) Take(n int) *Stream[T] {
 	if n < 0 {
 		panic("scoped: Take requires n >= 0")
 	}
-	var idx int
+
+	idx := 0
+
 	return &Stream[T]{
 		next: func(ctx context.Context) (T, error) {
 			if idx >= n {
@@ -137,20 +142,48 @@ func NewStream[T any](next func(context.Context) (T, error)) *Stream[T] {
 func FromSlice[T any](items []T) *Stream[T] {
 	cpy := make([]T, len(items))
 	copy(cpy, items)
+
 	var idx int
+
 	return NewStream(func(ctx context.Context) (T, error) {
+		var zero T
 		select {
 		case <-ctx.Done():
-			var zero T
 			return zero, ctx.Err()
 		default:
 		}
 		if idx >= len(cpy) {
-			var zero T
 			return zero, io.EOF
 		}
+
 		val := cpy[idx]
 		idx++
+		return val, nil
+	})
+}
+
+// FromSliceUnsafe creates a stream that reads directly from the provided slice
+// without copying. The caller must not modify the slice after this call.
+//
+// Use this instead of [FromSlice] in performance-critical paths where the
+// allocation cost of copying matters and ownership can be guaranteed.
+func FromSliceUnsafe[T any](items []T) *Stream[T] {
+	var idx int
+	return NewStream(func(ctx context.Context) (T, error) {
+		var zero T
+		select {
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		default:
+		}
+
+		if idx >= len(items) {
+			return zero, io.EOF
+		}
+
+		val := items[idx]
+		idx++
+
 		return val, nil
 	})
 }
@@ -158,17 +191,18 @@ func FromSlice[T any](items []T) *Stream[T] {
 // FromChan creates a stream from a channel.
 func FromChan[T any](ch <-chan T) *Stream[T] {
 	return NewStream(func(ctx context.Context) (T, error) {
+		var zero T
+
 		if ch == nil {
 			var zero T
 			return zero, io.EOF
 		}
+
 		select {
 		case <-ctx.Done():
-			var zero T
 			return zero, ctx.Err()
 		case v, ok := <-ch:
 			if !ok {
-				var zero T
 				return zero, io.EOF
 			}
 			return v, nil
@@ -265,7 +299,7 @@ func ParallelMap[A, B any](
 		panic("scoped: ParallelMap requires non-negative buffer size")
 	}
 	if opts.MaxWorkers <= 0 {
-		opts.MaxWorkers = runtime.NumCPU()
+		opts.MaxWorkers = runtime.NumCPU() // default to number of logical CPUs if not set
 	}
 
 	mapCtx, mapCancel := context.WithCancelCause(ctx)
@@ -277,90 +311,93 @@ func ParallelMap[A, B any](
 	}
 	out.next = makeParallelNext(out, opts, resCh)
 
-	sp.Spawn("parallel-map-dispatcher", func(taskCtx context.Context, _ Spawner) error {
-		defer close(resCh)
+	sp.Spawn(
+		"parallel-map-dispatcher",
+		func(taskCtx context.Context, _ Spawner) error {
+			defer close(resCh)
 
-		runCtx, runCancel := context.WithCancelCause(taskCtx)
+			runCtx, runCancel := context.WithCancelCause(taskCtx)
 
-		// Bridge: if the consumer calls stopNow() (which cancels mapCtx),
-		// propagate that into runCtx so workers and src.Next stop.
-		done := make(chan struct{})
-		go func() {
-			defer close(done)
-			select {
-			case <-mapCtx.Done():
-				runCancel(context.Cause(mapCtx))
-			case <-runCtx.Done():
-			}
-		}()
-
-		// IMPORTANT: defers run LIFO, so register <-done BEFORE runCancel
-		// so that runCancel fires first, allowing the done goroutine to exit.
-		defer func() { <-done }()
-		defer runCancel(nil)
-
-		var wg sync.WaitGroup
-		sem := make(chan struct{}, opts.MaxWorkers)
-		var inputIdx atomic.Int64
-
-		for {
-			val, err := src.Next(runCtx)
-			if err != nil {
-				if err != io.EOF {
-					// Suppress only context.Canceled errors caused by
-					// consumer-driven cancellation (stopNow/Take).
-					// All other source errors are always recorded.
-					consumerStopped := mapCtx.Err() != nil && ctx.Err() == nil
-					if !(consumerStopped && errors.Is(err, context.Canceled)) {
-						out.setError(err)
-					}
-				}
-				break
-			}
-
-			idx := inputIdx.Add(1) - 1
-			wg.Add(1)
-
-			select {
-			case sem <- struct{}{}:
-			case <-runCtx.Done():
-				wg.Done()
-				wg.Wait()
-				// Consumer-driven cancellation (stopNow/Take) is not an error,
-				// but external context cancellation should propagate.
-				if ctx.Err() != nil {
-					return runCtx.Err()
-				}
-				return nil
-			}
-
-			// Workers use raw goroutines — NOT sp.Spawn — to avoid
-			// deadlocking when the consumer reads resCh inside Run.
+			// Bridge: if the consumer calls stopNow() (which cancels mapCtx),
+			// propagate that into runCtx so workers and src.Next stop.
+			done := make(chan struct{})
 			go func() {
-				defer func() { <-sem; wg.Done() }()
-				var res B
-				var fnErr error
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							fnErr = fmt.Errorf("scoped: ParallelMap worker panicked: %v", r)
-						}
-					}()
-					res, fnErr = fn(runCtx, val)
-				}()
+				defer close(done)
 				select {
-				case resCh <- indexedResult[B]{
-					idx: idx,
-					val: res,
-					err: fnErr,
-				}:
+				case <-mapCtx.Done():
+					runCancel(context.Cause(mapCtx))
 				case <-runCtx.Done():
 				}
 			}()
-		}
-		wg.Wait()
-		return nil
-	})
+
+			// NOTE: defers run LIFO, so register <-done BEFORE runCancel
+			// so that runCancel fires first, allowing the done goroutine to exit.
+			defer func() { <-done }()
+			defer runCancel(nil)
+
+			var wg sync.WaitGroup
+			sem := make(chan struct{}, opts.MaxWorkers)
+			var inputIdx atomic.Int64
+
+			for {
+				val, err := src.Next(runCtx)
+				if err != nil {
+					if err != io.EOF {
+						// Suppress only context.Canceled errors caused by
+						// consumer-driven cancellation (stopNow/Take).
+						// All other source errors are always recorded.
+						consumerStopped := mapCtx.Err() != nil && ctx.Err() == nil
+						if !(consumerStopped && errors.Is(err, context.Canceled)) {
+							out.setError(err)
+						}
+					}
+					break
+				}
+
+				idx := inputIdx.Add(1) - 1
+				wg.Add(1)
+
+				select {
+				case sem <- struct{}{}:
+				case <-runCtx.Done():
+					wg.Done()
+					wg.Wait()
+					// Consumer-driven cancellation (stopNow/Take) is not an error,
+					// but external context cancellation should propagate.
+					if ctx.Err() != nil {
+						return runCtx.Err()
+					}
+					return nil
+				}
+
+				// Workers use raw goroutines — NOT sp.Spawn — to avoid
+				// deadlocking when the consumer reads resCh inside Run.
+				go func() {
+					defer func() { <-sem; wg.Done() }()
+					var res B
+					var fnErr error
+					func() {
+						defer func() {
+							if r := recover(); r != nil {
+								fnErr = fmt.Errorf("scoped: ParallelMap worker panicked: %v", r)
+							}
+						}()
+						res, fnErr = fn(runCtx, val)
+					}()
+					select {
+					case resCh <- indexedResult[B]{
+						idx: idx,
+						val: res,
+						err: fnErr,
+					}:
+					case <-runCtx.Done():
+					}
+				}()
+			}
+			wg.Wait()
+			return nil
+		},
+	)
 
 	return out
 }
@@ -393,14 +430,13 @@ func makeParallelNext[B any](
 				}
 			}
 
+			var zero B
 			select {
 			case <-ctx.Done():
-				var zero B
 				return zero, ctx.Err()
 			case res, ok := <-resCh:
 				if !ok {
 					if !opts.Ordered {
-						var zero B
 						return zero, io.EOF
 					}
 					// Channel closed — drain any remaining buffered results.
@@ -422,10 +458,10 @@ func makeParallelNext[B any](
 							}
 						}
 						out.setError(ErrStreamGap)
-						var zero B
+
 						return zero, ErrStreamGap
 					}
-					var zero B
+
 					return zero, io.EOF
 				}
 
@@ -452,9 +488,8 @@ type indexedResult[T any] struct {
 // ToSlice collects all items in the stream into a slice.
 // On error, any items collected before the error are returned alongside it,
 // following the io.Reader convention.
-func (s *Stream[T]) ToSlice(ctx context.Context) ([]T, error) {
+func (s *Stream[T]) ToSlice(ctx context.Context) (items []T, err error) {
 	defer s.stopNow()
-	var items []T
 	for {
 		val, err := s.Next(ctx)
 		if err == io.EOF {
@@ -494,30 +529,37 @@ func (s *Stream[T]) ToChanScope(sp Spawner) (<-chan T, <-chan error) {
 	if sp == nil {
 		panic("scoped: ToChanScope requires non-nil spawner")
 	}
+
 	ch := make(chan T)
 	errCh := make(chan error, 1)
-	sp.Spawn("stream-to-chan", func(ctx context.Context, _ Spawner) error {
-		defer s.stopNow()
-		defer close(ch)
-		defer close(errCh)
-		for {
-			val, err := s.Next(ctx)
-			if err == io.EOF {
-				errCh <- s.Err()
-				return nil
+
+	sp.Spawn(
+		"stream-to-chan",
+		func(ctx context.Context, _ Spawner) error {
+			defer s.stopNow()
+			defer close(ch)
+			defer close(errCh)
+			for {
+				val, err := s.Next(ctx)
+				if err == io.EOF {
+					errCh <- s.Err()
+					return nil
+				}
+
+				if err != nil {
+					errCh <- err
+					return err
+				}
+
+				select {
+				case ch <- val:
+				case <-ctx.Done():
+					errCh <- ctx.Err()
+					return ctx.Err()
+				}
 			}
-			if err != nil {
-				errCh <- err
-				return err
-			}
-			select {
-			case ch <- val:
-			case <-ctx.Done():
-				errCh <- ctx.Err()
-				return ctx.Err()
-			}
-		}
-	})
+		},
+	)
 	return ch, errCh
 }
 
@@ -533,15 +575,18 @@ func (s *Stream[T]) Skip(n int) *Stream[T] {
 	if n < 0 {
 		panic("scoped: Skip requires n >= 0")
 	}
+
 	var skipped int
+	var zero T
+
 	return &Stream[T]{
 		next: func(ctx context.Context) (T, error) {
 			for skipped < n {
 				_, err := s.Next(ctx)
 				if err != nil {
-					var zero T
 					return zero, err
 				}
+
 				skipped++
 			}
 			return s.Next(ctx)
@@ -570,7 +615,8 @@ func (s *Stream[T]) Peek(fn func(T)) *Stream[T] {
 // Count counts the number of items in the stream.
 func (s *Stream[T]) Count(ctx context.Context) (int, error) {
 	defer s.stopNow()
-	var count int
+	count := 0
+
 	for {
 		_, err := s.Next(ctx)
 		if err == io.EOF {
@@ -579,6 +625,7 @@ func (s *Stream[T]) Count(ctx context.Context) (int, error) {
 		if err != nil {
 			return count, err
 		}
+
 		count++
 	}
 }

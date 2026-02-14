@@ -92,6 +92,29 @@ func BenchmarkStream(b *testing.B) {
 	}
 }
 
+func BenchmarkFromSlice(b *testing.B) {
+	for _, size := range []int{100, 10000, 100000} {
+		items := make([]int, size)
+		for i := range items {
+			items[i] = i
+		}
+		b.Run(fmt.Sprintf("Safe/Size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				s := FromSlice(items)
+				_, _ = s.ToSlice(context.Background())
+			}
+		})
+		b.Run(fmt.Sprintf("Unsafe/Size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				s := FromSliceUnsafe(items)
+				_, _ = s.ToSlice(context.Background())
+			}
+		})
+	}
+}
+
 func BenchmarkHeavyParallel(b *testing.B) {
 	size := 10000
 	items := make([]int, size)

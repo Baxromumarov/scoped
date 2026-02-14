@@ -30,24 +30,34 @@ func SpawnResult[T any](
 ) *Result[T] {
 	r := &Result[T]{ch: make(chan ResultValue[T], 1)}
 
-	sp.Spawn(name, func(ctx context.Context, _ Spawner) (err error) {
-		var v T
+	sp.Spawn(
+		name,
+		func(ctx context.Context, _ Spawner) (err error) {
+			var v T
+			var zero T
+			
+			defer func() {
+				if rec := recover(); rec != nil {
 
-		defer func() {
-			if rec := recover(); rec != nil {
-				var zero T
-				r.ch <- ResultValue[T]{Val: zero, Err: newPanicError(rec)}
+					r.ch <- ResultValue[T]{
+						Val: zero,
+						Err: newPanicError(rec),
+					}
+					close(r.ch)
+					panic(rec)
+				}
+
+				r.ch <- ResultValue[T]{
+					Val: v,
+					Err: err,
+				}
 				close(r.ch)
-				panic(rec)
-			}
+			}()
 
-			r.ch <- ResultValue[T]{Val: v, Err: err}
-			close(r.ch)
-		}()
-
-		v, err = fn(ctx)
-		return err
-	})
+			v, err = fn(ctx)
+			return err
+		},
+	)
 
 	return r
 }

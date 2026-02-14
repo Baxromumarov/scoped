@@ -165,10 +165,12 @@ func (s *scope) recordError(taskInfo TaskInfo, err error) {
 	te := &TaskError{Task: taskInfo, Err: err}
 	switch s.cfg.policy {
 	case FailFast:
-		s.errOnce.Do(func() {
-			s.firstErr.Store(te)
-			s.cancel(err)
-		})
+		s.errOnce.Do(
+			func() {
+				s.firstErr.Store(te)
+				s.cancel(err)
+			},
+		)
 	case Collect:
 		s.errMu.Lock()
 		s.errs = append(s.errs, te)

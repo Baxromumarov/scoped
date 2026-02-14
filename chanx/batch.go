@@ -27,7 +27,7 @@ func RecvBatch[T any](ctx context.Context, ch <-chan T, n int) ([]T, error) {
 		panic("chanx: RecvBatch requires n > 0")
 	}
 	result := make([]T, 0, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		v, ok, err := Recv(ctx, ch)
 		if err != nil {
 			return result, err

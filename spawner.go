@@ -70,13 +70,15 @@ func (sp *spawner) Spawn(name string, fn TaskFunc) {
 		}
 
 		// Hooks run inside exec() so panics are caught by recovery.
-		err := sp.s.exec(func(ctx context.Context) error {
-			if sp.s.cfg.onStart != nil {
-				sp.s.cfg.onStart(info)
-			}
-			taskErr := fn(ctx, child)
-			return taskErr
-		})
+		err := sp.s.exec(
+			func(ctx context.Context) error {
+				if sp.s.cfg.onStart != nil {
+					sp.s.cfg.onStart(info)
+				}
+				taskErr := fn(ctx, child)
+				return taskErr
+			},
+		)
 
 		child.close()
 

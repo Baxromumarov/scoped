@@ -2,6 +2,7 @@ package scoped
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -49,9 +50,7 @@ func (s *Stream[T]) setError(err error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.err == nil {
-		s.err = err
-	}
+	s.err = errors.Join(s.err, err)
 }
 
 func (s *Stream[T]) stopNow() {
@@ -65,6 +64,13 @@ func (s *Stream[T]) stopNow() {
 	})
 }
 
+// Stop terminates the stream and releases associated resources.
+// Safe to call multiple times and concurrently.
+func (s *Stream[T]) Stop() {
+	s.stopNow()
+}
+
+// Filter returns a stream that only emits items for which fn returns true.
 func (s *Stream[T]) Filter(fn func(T) bool) *Stream[T] {
 	if fn == nil {
 		panic("scoped: Filter requires non-nil predicate")
@@ -127,7 +133,10 @@ func NewStream[T any](next func(context.Context) (T, error)) *Stream[T] {
 }
 
 // FromSlice creates a stream from a slice.
+// The slice is copied internally; the caller may safely modify the original after this call.
 func FromSlice[T any](items []T) *Stream[T] {
+	cpy := make([]T, len(items))
+	copy(cpy, items)
 	var idx int
 	return NewStream(func(ctx context.Context) (T, error) {
 		select {
@@ -136,11 +145,11 @@ func FromSlice[T any](items []T) *Stream[T] {
 			return zero, ctx.Err()
 		default:
 		}
-		if idx >= len(items) {
+		if idx >= len(cpy) {
 			var zero T
 			return zero, io.EOF
 		}
-		val := items[idx]
+		val := cpy[idx]
 		idx++
 		return val, nil
 	})
@@ -168,6 +177,8 @@ func FromChan[T any](ch <-chan T) *Stream[T] {
 }
 
 // FromFunc creates a stream from a function.
+//
+// Deprecated: Use [NewStream] instead, which is identical.
 func FromFunc[T any](fn func(context.Context) (T, error)) *Stream[T] {
 	return NewStream(fn)
 }
@@ -205,8 +216,8 @@ func Batch[T any](s *Stream[T], n int) *Stream[[]T] {
 	}
 	return &Stream[[]T]{
 		next: func(ctx context.Context) ([]T, error) {
-			var batch []T
-			for i := 0; i < n; i++ {
+			batch := make([]T, 0, n)
+			for range n {
 				val, err := s.Next(ctx)
 				if err != nil {
 					if err == io.EOF {
@@ -214,6 +225,9 @@ func Batch[T any](s *Stream[T], n int) *Stream[[]T] {
 							return batch, nil
 						}
 						return nil, io.EOF
+					}
+					if len(batch) > 0 {
+						return batch, err
 					}
 					return nil, err
 				}
@@ -293,12 +307,12 @@ func ParallelMap[A, B any](
 			val, err := src.Next(runCtx)
 			if err != nil {
 				if err != io.EOF {
-					// If the cancellation was consumer-driven (stopNow/Take)
-					// and NOT from the parent context, don't surface it.
-					if ctx.Err() != nil {
-						out.setError(err) // external cancellation
-					} else if mapCtx.Err() == nil {
-						out.setError(err) // real source error
+					// Suppress only context.Canceled errors caused by
+					// consumer-driven cancellation (stopNow/Take).
+					// All other source errors are always recorded.
+					consumerStopped := mapCtx.Err() != nil && ctx.Err() == nil
+					if !(consumerStopped && errors.Is(err, context.Canceled)) {
+						out.setError(err)
 					}
 				}
 				break
@@ -324,9 +338,22 @@ func ParallelMap[A, B any](
 			// deadlocking when the consumer reads resCh inside Run.
 			go func() {
 				defer func() { <-sem; wg.Done() }()
-				res, fnErr := fn(runCtx, val)
+				var res B
+				var fnErr error
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							fnErr = fmt.Errorf("scoped: ParallelMap worker panicked: %v", r)
+						}
+					}()
+					res, fnErr = fn(runCtx, val)
+				}()
 				select {
-				case resCh <- indexedResult[B]{idx: idx, val: res, err: fnErr}:
+				case resCh <- indexedResult[B]{
+					idx: idx,
+					val: res,
+					err: fnErr,
+				}:
 				case <-runCtx.Done():
 				}
 			}()
@@ -346,6 +373,10 @@ func makeParallelNext[B any](
 	var nextIdx int64
 	// For ordered mode, buffer out-of-order results in a map keyed by index.
 	// This avoids heap allocations (heap.Push/Pop box into any).
+	//
+	// NOTE: pending can grow up to the total stream size if an early item
+	// is slow while later items complete quickly. The practical bound is
+	// MaxWorkers + BufferSize for most workloads.
 	pending := make(map[int64]indexedResult[B])
 
 	return func(ctx context.Context) (B, error) {
@@ -419,6 +450,8 @@ type indexedResult[T any] struct {
 }
 
 // ToSlice collects all items in the stream into a slice.
+// On error, any items collected before the error are returned alongside it,
+// following the io.Reader convention.
 func (s *Stream[T]) ToSlice(ctx context.Context) ([]T, error) {
 	defer s.stopNow()
 	var items []T
@@ -428,7 +461,7 @@ func (s *Stream[T]) ToSlice(ctx context.Context) ([]T, error) {
 			return items, s.Err()
 		}
 		if err != nil {
-			return nil, err
+			return items, err
 		}
 		items = append(items, val)
 	}
@@ -489,6 +522,8 @@ func (s *Stream[T]) ToChanScope(sp Spawner) (<-chan T, <-chan error) {
 }
 
 // Collect is an alias for ToSlice.
+//
+// Deprecated: Use [Stream.ToSlice] instead.
 func (s *Stream[T]) Collect(ctx context.Context) ([]T, error) {
 	return s.ToSlice(ctx)
 }

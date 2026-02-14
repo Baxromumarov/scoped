@@ -5,6 +5,9 @@ import (
 	"fmt"
 )
 
+// TaskError wraps an error together with the [TaskInfo] of the task that
+// produced it. Scope error aggregation wraps every task failure in a
+// TaskError so callers can attribute errors to specific tasks.
 type TaskError struct {
 	Task TaskInfo
 	Err  error
@@ -18,6 +21,7 @@ func (e *TaskError) Unwrap() error {
 	return e.Err
 }
 
+// IsTaskError reports whether err (or any error in its chain) is a [*TaskError].
 func IsTaskError(err error) bool {
 	if err == nil {
 		return false
@@ -26,6 +30,8 @@ func IsTaskError(err error) bool {
 	return errors.As(err, &te)
 }
 
+// TaskOf extracts the [TaskInfo] from the first [*TaskError] in err's chain.
+// Returns false if no TaskError is found.
 func TaskOf(err error) (TaskInfo, bool) {
 	if err == nil {
 		return TaskInfo{}, false
@@ -38,6 +44,9 @@ func TaskOf(err error) (TaskInfo, bool) {
 	return TaskInfo{}, false
 }
 
+// CauseOf unwraps the first [*TaskError] in err's chain and returns its
+// underlying cause. If err is not a TaskError, it is returned as-is.
+// Returns nil if err is nil.
 func CauseOf(err error) error {
 	if err == nil {
 		return nil
@@ -50,6 +59,8 @@ func CauseOf(err error) error {
 
 	return err
 }
+// AllTaskErrors recursively collects every [*TaskError] from err's chain,
+// including errors wrapped via [errors.Join]. Returns nil if none are found.
 func AllTaskErrors(err error) []*TaskError {
 	if err == nil {
 		return nil

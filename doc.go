@@ -26,6 +26,18 @@
 //   - [Collect]: all errors are collected without cancelling siblings.
 //     [Scope.Wait] returns all errors joined via [errors.Join].
 //
+// All task errors are wrapped in [*TaskError] for attribution. Use
+// [IsTaskError], [TaskOf], [CauseOf], and [AllTaskErrors] to inspect them.
+//
+// # Streams
+//
+// [Stream] provides a pull-based, composable data pipeline. Chains of
+// [Stream.Filter], [Stream.Take], [Map], and [Batch] are evaluated lazily.
+// [ParallelMap] processes items concurrently with optional ordering.
+// Terminal methods ([Stream.ToSlice], [Stream.ForEach]) return partial results
+// alongside any error, following [io.Reader] conventions. Stream errors are
+// aggregated via [errors.Join].
+//
 // # Bounded Concurrency
 //
 // Use [WithLimit] to restrict the number of goroutines executing

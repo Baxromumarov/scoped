@@ -28,10 +28,13 @@ func (sp *spawner) Spawn(name string, fn TaskFunc) {
 	}
 
 	sp.s.wg.Add(1)
+	sp.s.totalSpawned.Add(1)
+	sp.s.activeTasks.Add(1)
 
 	info := TaskInfo{Name: name}
 
 	go func() {
+		defer sp.s.activeTasks.Add(-1)
 		defer sp.s.wg.Done()
 
 		// semaphore

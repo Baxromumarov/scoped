@@ -411,9 +411,12 @@ func TestBatchErrorAndCountPartial(t *testing.T) {
 	})
 
 	b := Batch(s, 10)
-	_, err := b.Next(context.Background())
+	got, err := b.Next(context.Background())
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("expected %v, got %v", sentinel, err)
+	}
+	if !reflect.DeepEqual(got, []int{1, 2}) {
+		t.Fatalf("expected partial batch [1 2], got %v", got)
 	}
 
 	i = 0
@@ -683,4 +686,89 @@ func TestMakeParallelNextBranches(t *testing.T) {
 			t.Fatalf("expected stream error %v, got %v", sentinel, out.Err())
 		}
 	})
+}
+
+func TestPublicStop(t *testing.T) {
+	var stops atomic.Int32
+	s := &Stream[int]{
+		next: func(ctx context.Context) (int, error) { return 1, nil },
+		stop: func() { stops.Add(1) },
+	}
+	s.Stop()
+	s.Stop() // idempotent
+	if stops.Load() != 1 {
+		t.Fatalf("expected stop called once, got %d", stops.Load())
+	}
+}
+
+func TestFromSliceCopysSafely(t *testing.T) {
+	items := []int{1, 2, 3}
+	s := FromSlice(items)
+	// Mutate original after creating stream.
+	items[0] = 99
+	res, err := s.ToSlice(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []int{1, 2, 3}
+	if !reflect.DeepEqual(res, want) {
+		t.Errorf("got %v, want %v (FromSlice should copy)", res, want)
+	}
+}
+
+func TestToSliceReturnsPartialOnError(t *testing.T) {
+	sentinel := errors.New("mid-stream")
+	i := 0
+	s := NewStream(func(ctx context.Context) (int, error) {
+		i++
+		if i <= 3 {
+			return i, nil
+		}
+		return 0, sentinel
+	})
+	got, err := s.ToSlice(context.Background())
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected %v, got %v", sentinel, err)
+	}
+	want := []int{1, 2, 3}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected partial results %v, got %v", want, got)
+	}
+}
+
+func TestParallelMapWorkerPanicRecovery(t *testing.T) {
+	err := Run(context.Background(), func(s Spawner) {
+		src := FromSlice([]int{1, 2, 3})
+		pm := ParallelMap(context.Background(), s, src, StreamOptions{MaxWorkers: 2}, func(ctx context.Context, v int) (int, error) {
+			if v == 2 {
+				panic("worker exploded")
+			}
+			return v * 10, nil
+		})
+		_, streamErr := pm.ToSlice(context.Background())
+		if streamErr == nil {
+			t.Fatal("expected error from panicking worker")
+		}
+		if !strings.Contains(streamErr.Error(), "panicked") {
+			t.Fatalf("expected panic error, got %v", streamErr)
+		}
+	})
+	if err != nil {
+		t.Fatalf("scope should not crash from worker panic: %v", err)
+	}
+}
+
+func TestSetErrorAggregates(t *testing.T) {
+	s := &Stream[int]{}
+	err1 := errors.New("first")
+	err2 := errors.New("second")
+	s.setError(err1)
+	s.setError(err2)
+	got := s.Err()
+	if !errors.Is(got, err1) {
+		t.Fatalf("expected aggregated error to contain %v", err1)
+	}
+	if !errors.Is(got, err2) {
+		t.Fatalf("expected aggregated error to contain %v", err2)
+	}
 }

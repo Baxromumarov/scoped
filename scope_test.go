@@ -784,3 +784,50 @@ func TestRun_SubTasks(t *testing.T) {
 		t.Fatalf("expected 4 (1 parent + 3 children), got %d", got)
 	}
 }
+
+func TestScopeObservability(t *testing.T) {
+	sc, sp := scoped.New(context.Background())
+
+	if sc.TotalSpawned() != 0 {
+		t.Fatalf("expected 0 total spawned, got %d", sc.TotalSpawned())
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	sp.Spawn("blocker", func(ctx context.Context, _ scoped.Spawner) error {
+		close(started)
+		<-release
+		return nil
+	})
+
+	<-started
+	if sc.TotalSpawned() != 1 {
+		t.Fatalf("expected 1 total spawned, got %d", sc.TotalSpawned())
+	}
+	if sc.ActiveTasks() != 1 {
+		t.Fatalf("expected 1 active task, got %d", sc.ActiveTasks())
+	}
+
+	close(release)
+	if err := sc.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if sc.ActiveTasks() != 0 {
+		t.Fatalf("expected 0 active tasks after wait, got %d", sc.ActiveTasks())
+	}
+	if sc.TotalSpawned() != 1 {
+		t.Fatalf("expected 1 total spawned after wait, got %d", sc.TotalSpawned())
+	}
+}
+
+func TestSpawnTimeout(t *testing.T) {
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		scoped.SpawnTimeout(sp, "slow", 10*time.Millisecond, func(ctx context.Context, _ scoped.Spawner) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected DeadlineExceeded, got %v", err)
+	}
+}

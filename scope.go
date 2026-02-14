@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 )
 
 // TaskFunc is the signature for a task function running within a scope.
@@ -57,8 +58,18 @@ type scope struct {
 	finOnce  sync.Once
 	finErr   error
 	finPanic *PanicError
+
+	// Observability counters.
+	totalSpawned atomic.Int64
+	activeTasks  atomic.Int64
 }
 
+// Run creates a [Scope], invokes fn with its root [Spawner], then waits for
+// every spawned task to complete. It returns the aggregated error according to
+// the configured [Policy] (default [FailFast]).
+//
+// Run is the primary entry point for structured concurrency. The scope is
+// automatically finalized when fn returns, so no explicit cleanup is needed.
 func Run(parent context.Context, fn func(sp Spawner), opts ...Option) (err error) {
 	sc, sp := New(parent, opts...)
 
@@ -165,7 +176,8 @@ func (s *scope) recordError(taskInfo TaskInfo, err error) {
 	}
 }
 
-// Scope, it wraps internal scope and provides the Spawner interface to users.
+// Scope wraps the internal scope state and exposes lifecycle and
+// observability methods. Create one via [New]; finalize with [Scope.Wait].
 type Scope struct {
 	s        *scope
 	root     *spawner
@@ -174,20 +186,12 @@ type Scope struct {
 	panicVal *PanicError
 }
 
-// New creates a new Scope with the given parent context and options. It returns the Scope and
-// a Spawner for spawning tasks within the scope. The Scope must be finalized by calling Wait().
-/*
-	Example:
-
-	sc, sp := New(context.Background(), WithPolicy(Collect))
-	sp.Spawn("task1", func(ctx context.Context, sp Spawner) error {
-	    *task implementation is here*
-	    return nil
-	})
-	err := sc.Wait()
-
-*/
-
+// New creates a [Scope] and root [Spawner] for manual lifecycle control.
+// The caller must call [Scope.Wait] to finalize the scope and collect errors.
+//
+// Prefer [Run] for most use cases; use New when you need to pass the
+// [Spawner] across function boundaries or integrate with existing lifecycle
+// management.
 func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 	cfg := defaultConfig()
 	for _, opt := range opts {
@@ -216,6 +220,11 @@ func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 	return sc, root
 }
 
+// Wait closes the root [Spawner], waits for all spawned tasks to complete,
+// and returns the aggregated error. If a task panicked and [WithPanicAsError]
+// was not set, Wait re-panics with the captured [*PanicError].
+//
+// Wait is idempotent; subsequent calls return the same result.
 func (sc *Scope) Wait() error {
 	sc.once.Do(func() {
 		sc.root.close()
@@ -228,10 +237,25 @@ func (sc *Scope) Wait() error {
 	return sc.result
 }
 
+// Cancel cancels the scope's context with the given cause, signaling all
+// tasks to stop. Subsequent calls have no additional effect on the context.
 func (sc *Scope) Cancel(err error) {
 	sc.s.cancel(err)
 }
 
+// Context returns the scope's context, which is cancelled when the scope
+// finalizes or is explicitly cancelled via [Scope.Cancel].
 func (sc *Scope) Context() context.Context {
 	return sc.s.ctx
+}
+
+// ActiveTasks returns the number of tasks currently executing within the scope.
+func (sc *Scope) ActiveTasks() int64 {
+	return sc.s.activeTasks.Load()
+}
+
+// TotalSpawned returns the total number of tasks that have been spawned
+// within the scope, including those that have already completed.
+func (sc *Scope) TotalSpawned() int64 {
+	return sc.s.totalSpawned.Load()
 }

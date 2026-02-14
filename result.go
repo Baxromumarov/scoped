@@ -52,6 +52,7 @@ func SpawnResult[T any](
 	return r
 }
 
+// Wait blocks until the task completes and returns its value and error.
 func (r *Result[T]) Wait() (T, error) {
 	res := <-r.ch
 	return res.Val, res.Err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 )
 
 // ForEachSlice executes fn for each item in the slice concurrently,
@@ -101,6 +102,18 @@ func MapSlice[T, R any](
 		return results, err
 	}
 	return results, nil
+}
+
+// SpawnTimeout spawns a task with a per-task deadline. If the task does not
+// complete within d, its context is cancelled with [context.DeadlineExceeded].
+//
+// The timeout only affects this task's context; it does not cancel the scope.
+func SpawnTimeout(sp Spawner, name string, d time.Duration, fn TaskFunc) {
+	sp.Spawn(name, func(ctx context.Context, child Spawner) error {
+		ctx, cancel := context.WithTimeout(ctx, d)
+		defer cancel()
+		return fn(ctx, child)
+	})
 }
 
 type atomicError struct{ v atomic.Value }

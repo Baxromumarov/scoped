@@ -307,7 +307,7 @@ func TestStreamValidationPanics(t *testing.T) {
 	})
 
 	expectPanicContains(t, "Map requires non-nil source", func() {
-		Map[int, int](nil, func(ctx context.Context, v int) (int, error) { return v, nil })
+		Map(nil, func(ctx context.Context, v int) (int, error) { return v, nil })
 	})
 
 	expectPanicContains(t, "Map requires non-nil mapper", func() {
@@ -352,7 +352,7 @@ func TestStreamValidationPanics(t *testing.T) {
 
 	expectPanicContains(t, "ParallelMap requires non-nil source", func() {
 		_ = Run(context.Background(), func(sp Spawner) {
-			_ = ParallelMap[int, int](context.Background(), sp, nil, StreamOptions{}, func(ctx context.Context, v int) (int, error) {
+			_ = ParallelMap(context.Background(), sp, nil, StreamOptions{}, func(ctx context.Context, v int) (int, error) {
 				return v, nil
 			})
 		})

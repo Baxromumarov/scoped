@@ -28,6 +28,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // TaskFunc is the signature for a task function running within a scope.
@@ -47,8 +48,9 @@ type scope struct {
 	firstErr atomicError // for concurrent access in Spawn and Wait
 	errOnce  sync.Once
 
-	errMu sync.Mutex
-	errs  []*TaskError
+	errMu         sync.Mutex
+	errs          []*TaskError
+	droppedErrors int // errors exceeding maxErrors cap
 
 	panicMu sync.Mutex
 	panics  []*PanicError
@@ -74,18 +76,24 @@ func Run(parent context.Context, fn func(sp Spawner), opts ...Option) (err error
 	sc, sp := New(parent, opts...)
 
 	defer func() {
+		// Step 1: Capture any panic from fn before cleanup.
 		runPanic := recover()
 
-		// Stop accepting new root tasks before waiting for completion.
+		// Step 2: Close the root spawner so no new tasks can be submitted.
 		sc.root.close()
-		waitErr, waitPanic := sc.s.finalize() // or sc.Wait(), but that panics on panicErr
 
+		// Step 3: Wait for all in-flight tasks and aggregate errors.
+		waitErr, waitPanic := sc.s.finalize()
+
+		// Step 4: Re-raise panics. User panics take priority over task panics.
 		if runPanic != nil {
 			panic(runPanic)
 		}
 		if waitPanic != nil {
 			panic(waitPanic)
 		}
+
+		// Step 5: Surface the aggregated task error.
 		err = waitErr
 	}()
 
@@ -160,9 +168,48 @@ func (s *scope) exec(fn func(ctx context.Context) error) (err error) {
 	return fn(s.ctx)
 }
 
+// emitEvent calls the onEvent hook if registered.
+func (s *scope) emitEvent(e TaskEvent) {
+	if s.cfg.onEvent != nil {
+		s.cfg.onEvent(e)
+	}
+}
+
+// emitCompletionEvent determines the correct EventKind for a completed task
+// and emits the event via the onEvent hook.
+func (s *scope) emitCompletionEvent(info TaskInfo, err error, d time.Duration) {
+	if s.cfg.onEvent == nil {
+		return
+	}
+
+	var kind EventKind
+	
+	switch {
+	case err == nil:
+		kind = EventDone
+	case errors.As(err, new(*PanicError)):
+		kind = EventPanicked
+	case s.ctx.Err() != nil:
+		kind = EventCancelled
+	default:
+		kind = EventErrored
+	}
+
+	s.cfg.onEvent(TaskEvent{
+		Kind:     kind,
+		Task:     info,
+		Err:      err,
+		Duration: d,
+	})
+}
+
 // recordError records an error according to the configured policy.
 func (s *scope) recordError(taskInfo TaskInfo, err error) {
-	te := &TaskError{Task: taskInfo, Err: err}
+	te := &TaskError{
+		Task: taskInfo,
+		Err:  err,
+	}
+	
 	switch s.cfg.policy {
 	case FailFast:
 		s.errOnce.Do(
@@ -173,7 +220,11 @@ func (s *scope) recordError(taskInfo TaskInfo, err error) {
 		)
 	case Collect:
 		s.errMu.Lock()
-		s.errs = append(s.errs, te)
+		if s.cfg.maxErrors > 0 && len(s.errs) >= s.cfg.maxErrors {
+			s.droppedErrors++
+		} else {
+			s.errs = append(s.errs, te)
+		}
 		s.errMu.Unlock()
 	}
 }
@@ -211,8 +262,10 @@ func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 		s.sem = make(chan struct{}, cfg.limit)
 	}
 
-	root := &spawner{s: s}
-	root.open.Store(true)
+	root := &spawner{
+		s:    s,
+		open: true,
+	}
 
 	sc := &Scope{
 		s:    s,
@@ -260,4 +313,14 @@ func (sc *Scope) ActiveTasks() int64 {
 // within the scope, including those that have already completed.
 func (sc *Scope) TotalSpawned() int64 {
 	return sc.s.totalSpawned.Load()
+}
+
+// DroppedErrors returns the number of errors that were not stored because
+// the [WithMaxErrors] limit was reached. This is only meaningful in
+// [Collect] mode.
+func (sc *Scope) DroppedErrors() int {
+	sc.s.errMu.Lock()
+	defer sc.s.errMu.Unlock()
+
+	return sc.s.droppedErrors
 }

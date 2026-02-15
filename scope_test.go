@@ -831,3 +831,256 @@ func TestSpawnTimeout(t *testing.T) {
 		t.Fatalf("expected DeadlineExceeded, got %v", err)
 	}
 }
+
+// TestSpawnRaceCloseAdd verifies that the TOCTOU race between Spawn and
+// close is fixed: concurrent close + Spawn must not cause a WaitGroup panic.
+func TestSpawnRaceCloseAdd(t *testing.T) {
+	for range 100 {
+		sc, sp := scoped.New(context.Background())
+
+		// Spawn many tasks concurrently while triggering Wait (which closes).
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// Spawn as fast as possible; some will panic after close — that's OK.
+			for range 50 {
+				func() {
+					defer func() { recover() }() // catch "Spawn after shutdown"
+					sp.Spawn("racer", func(ctx context.Context, _ scoped.Spawner) error {
+						return nil
+					})
+				}()
+			}
+		}()
+
+		// Wait closes the root spawner and finalizes.
+		_ = sc.Wait()
+		wg.Wait()
+	}
+}
+
+// TestWithMaxErrors verifies that Collect mode caps stored errors.
+func TestWithMaxErrors(t *testing.T) {
+	sc, sp := scoped.New(context.Background(),
+		scoped.WithPolicy(scoped.Collect),
+		scoped.WithMaxErrors(3),
+	)
+
+	for i := range 10 {
+		sp.Spawn(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
+			return fmt.Errorf("err-%d", i)
+		})
+	}
+
+	err := sc.Wait()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	taskErrs := scoped.AllTaskErrors(err)
+	if len(taskErrs) != 3 {
+		t.Fatalf("expected 3 stored errors, got %d", len(taskErrs))
+	}
+
+	dropped := sc.DroppedErrors()
+	if dropped != 7 {
+		t.Fatalf("expected 7 dropped errors, got %d", dropped)
+	}
+}
+
+// TestWithMaxErrorsZeroUnlimited verifies default (0) means unlimited.
+func TestWithMaxErrorsZeroUnlimited(t *testing.T) {
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		for i := range 20 {
+			sp.Spawn(fmt.Sprintf("t-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
+				return fmt.Errorf("e-%d", i)
+			})
+		}
+	}, scoped.WithPolicy(scoped.Collect), scoped.WithMaxErrors(0))
+
+	taskErrs := scoped.AllTaskErrors(err)
+	if len(taskErrs) != 20 {
+		t.Fatalf("expected 20 errors (unlimited), got %d", len(taskErrs))
+	}
+}
+
+// TestSpawnScope verifies hierarchical sub-scopes.
+func TestSpawnScope(t *testing.T) {
+	var count atomic.Int32
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		// Sub-scope with Collect policy inside FailFast parent.
+		scoped.SpawnScope(sp, "batch", func(sub scoped.Spawner) {
+			for i := range 5 {
+				sub.Spawn(fmt.Sprintf("sub-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
+					count.Add(1)
+					if i == 2 {
+						return fmt.Errorf("sub-error")
+					}
+					return nil
+				})
+			}
+		}, scoped.WithPolicy(scoped.Collect))
+	})
+
+	// All 5 sub-tasks ran because the sub-scope uses Collect.
+	if got := count.Load(); got != 5 {
+		t.Fatalf("expected 5 sub-tasks, got %d", got)
+	}
+	// The parent sees the sub-scope's joined error.
+	if err == nil {
+		t.Fatal("expected error from sub-scope")
+	}
+}
+
+// TestSpawnScopeIsolation verifies that a failing sub-scope doesn't
+// prevent sibling tasks from completing (when parent uses Collect).
+func TestSpawnScopeIsolation(t *testing.T) {
+	var siblingDone atomic.Bool
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		scoped.SpawnScope(sp, "failing-batch", func(sub scoped.Spawner) {
+			sub.Spawn("fail", func(ctx context.Context, _ scoped.Spawner) error {
+				return fmt.Errorf("boom")
+			})
+		})
+
+		sp.Spawn("sibling", func(ctx context.Context, _ scoped.Spawner) error {
+			time.Sleep(10 * time.Millisecond)
+			siblingDone.Store(true)
+			return nil
+		})
+	}, scoped.WithPolicy(scoped.Collect))
+
+	if !siblingDone.Load() {
+		t.Fatal("sibling should have completed")
+	}
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+// TestWithOnEvent verifies the unified TaskEvent hook.
+func TestWithOnEvent(t *testing.T) {
+	var mu sync.Mutex
+	var events []scoped.TaskEvent
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		sp.Spawn("ok-task", func(ctx context.Context, _ scoped.Spawner) error {
+			return nil
+		})
+		sp.Spawn("err-task", func(ctx context.Context, _ scoped.Spawner) error {
+			return fmt.Errorf("failed")
+		})
+	},
+		scoped.WithPolicy(scoped.Collect),
+		scoped.WithOnEvent(func(e scoped.TaskEvent) {
+			mu.Lock()
+			events = append(events, e)
+			mu.Unlock()
+		}),
+	)
+	_ = err
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	// Each task should produce 2 events: started + (done|errored).
+	if len(events) != 4 {
+		t.Fatalf("expected 4 events, got %d", len(events))
+	}
+
+	// Count event kinds.
+	counts := map[scoped.EventKind]int{}
+	for _, e := range events {
+		counts[e.Kind]++
+	}
+	if counts[scoped.EventStarted] != 2 {
+		t.Fatalf("expected 2 started events, got %d", counts[scoped.EventStarted])
+	}
+	if counts[scoped.EventDone] != 1 {
+		t.Fatalf("expected 1 done event, got %d", counts[scoped.EventDone])
+	}
+	if counts[scoped.EventErrored] != 1 {
+		t.Fatalf("expected 1 errored event, got %d", counts[scoped.EventErrored])
+	}
+}
+
+// TestWithOnEventPanic verifies EventPanicked is emitted on task panic.
+func TestWithOnEventPanic(t *testing.T) {
+	var mu sync.Mutex
+	var events []scoped.TaskEvent
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		sp.Spawn("panicker", func(ctx context.Context, _ scoped.Spawner) error {
+			panic("boom")
+		})
+	},
+		scoped.WithPanicAsError(),
+		scoped.WithOnEvent(func(e scoped.TaskEvent) {
+			mu.Lock()
+			events = append(events, e)
+			mu.Unlock()
+		}),
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+
+	var foundPanicked bool
+	for _, e := range events {
+		if e.Kind == scoped.EventPanicked {
+			foundPanicked = true
+		}
+	}
+	if !foundPanicked {
+		t.Fatal("expected EventPanicked event")
+	}
+}
+
+// TestEventKindString verifies the String() method.
+func TestEventKindString(t *testing.T) {
+	cases := []struct {
+		kind scoped.EventKind
+		want string
+	}{
+		{scoped.EventStarted, "started"},
+		{scoped.EventDone, "done"},
+		{scoped.EventErrored, "errored"},
+		{scoped.EventPanicked, "panicked"},
+		{scoped.EventCancelled, "cancelled"},
+		{scoped.EventKind(99), "unknown"},
+	}
+	for _, tc := range cases {
+		if got := tc.kind.String(); got != tc.want {
+			t.Errorf("EventKind(%d).String() = %q, want %q", tc.kind, got, tc.want)
+		}
+	}
+}
+
+// TestChildSpawnerLifetime verifies that using a child spawner after the
+// task returns panics.
+func TestChildSpawnerLifetime(t *testing.T) {
+	var captured scoped.Spawner
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		sp.Spawn("capture", func(ctx context.Context, child scoped.Spawner) error {
+			captured = child
+			return nil
+		})
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	p := capturePanic(func() {
+		captured.Spawn("late", func(context.Context, scoped.Spawner) error { return nil })
+	})
+	if p == nil {
+		t.Fatal("expected panic from Spawn on closed child spawner")
+	}
+}

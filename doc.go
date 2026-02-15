@@ -38,6 +38,13 @@
 // alongside any error, following [io.Reader] conventions. Stream errors are
 // aggregated via [errors.Join].
 //
+// # Spawner Lifetime
+//
+// Each task function receives a child [Spawner] that is valid only for the
+// duration of the task. Storing the child Spawner and calling Spawn on it
+// after the task returns will panic. This is by design: structured
+// concurrency requires that all child tasks are scoped to their parent.
+//
 // # Bounded Concurrency
 //
 // Use [WithLimit] to restrict the number of goroutines executing

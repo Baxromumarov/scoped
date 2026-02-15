@@ -21,12 +21,57 @@ type TaskInfo struct {
 	Name string
 }
 
+// EventKind identifies the lifecycle stage of a [TaskEvent].
+type EventKind int
+
+const (
+	// EventStarted is emitted when a task begins executing.
+	EventStarted EventKind = iota
+	// EventDone is emitted when a task completes successfully (Err is nil).
+	EventDone
+	// EventErrored is emitted when a task returns a non-nil error.
+	EventErrored
+	// EventPanicked is emitted when a task panics.
+	EventPanicked
+	// EventCancelled is emitted when a task's context was cancelled
+	// before or during execution.
+	EventCancelled
+)
+
+func (k EventKind) String() string {
+	switch k {
+	case EventStarted:
+		return "started"
+	case EventDone:
+		return "done"
+	case EventErrored:
+		return "errored"
+	case EventPanicked:
+		return "panicked"
+	case EventCancelled:
+		return "cancelled"
+	default:
+		return "unknown"
+	}
+}
+
+// TaskEvent describes a lifecycle event for a task. It is passed to the
+// callback registered via [WithOnEvent].
+type TaskEvent struct {
+	Kind     EventKind
+	Task     TaskInfo
+	Err      error         // non-nil for EventErrored and EventPanicked
+	Duration time.Duration // wall-clock time; zero for EventStarted
+}
+
 type config struct {
 	policy     Policy
 	limit      int
+	maxErrors  int // 0 = unlimited (default)
 	panicAsErr bool
 	onStart    func(TaskInfo)
 	onDone     func(TaskInfo, error, time.Duration)
+	onEvent    func(TaskEvent)
 }
 
 // Option configures a [Scope].
@@ -66,6 +111,22 @@ func WithLimit(n int) Option {
 	}
 }
 
+// WithMaxErrors sets the maximum number of errors stored in [Collect] mode.
+// When the limit is reached, subsequent errors are still counted but not stored,
+// preventing unbounded memory growth in high-volume scenarios.
+//
+// A value of zero (the default) means unlimited error collection.
+// This option has no effect in [FailFast] mode.
+// WithMaxErrors panics if n is negative.
+func WithMaxErrors(n int) Option {
+	return func(c *config) {
+		if n < 0 {
+			panic("scoped: maxErrors must be non-negative")
+		}
+		c.maxErrors = n
+	}
+}
+
 // WithPanicAsError converts panics in child tasks to [*PanicError]
 // values returned as regular errors, instead of re-raising them
 // in [Scope.Wait].
@@ -89,5 +150,17 @@ func WithOnStart(fn func(TaskInfo)) Option {
 func WithOnDone(fn func(TaskInfo, error, time.Duration)) Option {
 	return func(c *config) {
 		c.onDone = fn
+	}
+}
+
+// WithOnEvent registers a unified lifecycle hook that receives a [TaskEvent]
+// for every task state change: started, done, errored, panicked, and cancelled.
+// The hook runs inside the task's goroutine.
+//
+// WithOnEvent can be used alongside [WithOnStart] and [WithOnDone]; all
+// registered hooks will fire.
+func WithOnEvent(fn func(TaskEvent)) Option {
+	return func(c *config) {
+		c.onEvent = fn
 	}
 }

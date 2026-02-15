@@ -116,6 +116,32 @@ func SpawnTimeout(sp Spawner, name string, d time.Duration, fn TaskFunc) {
 	})
 }
 
+// SpawnScope spawns a sub-scope as a single task within the parent scope.
+// The sub-scope has its own error policy and options, allowing hierarchical
+// error handling. The sub-scope's aggregated error (if any) is propagated
+// to the parent scope as the task's error.
+//
+// This enables patterns like running a batch of tasks with [Collect] policy
+// inside a parent scope using [FailFast]:
+//
+//	scoped.Run(
+// 		ctx, 
+// 		func(sp scoped.Spawner) {
+//	    scoped.SpawnScope(sp, "batch", func(sub scoped.Spawner) {
+//	        for _, item := range items {
+//	            sub.Spawn(item.Name, item.Process)
+//	        }
+//	    }, scoped.WithPolicy(scoped.Collect))
+//	})
+func SpawnScope(sp Spawner, name string, fn func(sp Spawner), opts ...Option) {
+	sp.Spawn(
+		name,
+		func(ctx context.Context, _ Spawner) error {
+			return Run(ctx, fn, opts...)
+		},
+	)
+}
+
 type atomicError struct{ v atomic.Value }
 
 type storedError struct {

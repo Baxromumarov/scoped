@@ -1,21 +1,31 @@
-// Package scoped provides structured concurrency primitives for Spawn.
+// Package scoped provides structured concurrency primitives for Go.
 //
 // Structured concurrency ensures that concurrent tasks have well-defined
 // lifecycles: they are spawned and joined within a clear scope, preventing
 // goroutine leaks, orphaned tasks, and unpredictable control flow.
 //
-// The primary entry point is [Run], which creates a [Scope], executes a
-// function that spawns tasks via [Scope.Spawn], and waits for all tasks to
+// # Running Tasks
+//
+// The primary entry point is [Run], which creates a scope, executes a
+// function that spawns tasks via [Spawner], and waits for all tasks to
 // complete before returning:
 //
 //	err := scoped.Run(ctx, func(sp scoped.Spawner) {
-//	    sp.Spawn("fetch", func(ctx context.Context, _ scoped.Spawner) error {
+//	    sp.Go("fetch", func(ctx context.Context) error {
 //	        return fetch(ctx)
 //	    })
-//	    sp.Spawn("process", func(ctx context.Context, _ scoped.Spawner) error {
-//	        return process(ctx)
+//	    sp.Spawn("process", func(ctx context.Context, sub scoped.Spawner) error {
+//	        sub.Go("step-1", step1)
+//	        return nil
 //	    })
 //	})
+//
+// Use [Spawner.Go] for simple tasks and [Spawner.Spawn] when the task
+// needs to spawn sub-tasks of its own.
+//
+// For manual lifecycle control, [New] returns a [Scope] and root [Spawner]
+// separately. The caller must call [Scope.Wait] to finalize.
+// [Scope.WaitTimeout] adds a deadline to finalization.
 //
 // # Error Policies
 //
@@ -25,18 +35,74 @@
 //     [Scope.Wait] returns that first error.
 //   - [Collect]: all errors are collected without cancelling siblings.
 //     [Scope.Wait] returns all errors joined via [errors.Join].
+//     Use [WithMaxErrors] to cap stored errors in high-volume scenarios.
 //
 // All task errors are wrapped in [*TaskError] for attribution. Use
 // [IsTaskError], [TaskOf], [CauseOf], and [AllTaskErrors] to inspect them.
 //
+// # Helpers
+//
+// Convenience functions for common patterns:
+//
+//   - [ForEachSlice]: apply a function to every item in a slice concurrently.
+//   - [MapSlice]: transform every item concurrently, preserving order.
+//   - [SpawnResult]: spawn a task that returns a typed value via [Result].
+//   - [SpawnTimeout]: spawn a task with a per-task deadline.
+//   - [SpawnRetry]: spawn a task with exponential-backoff retries.
+//   - [SpawnScope]: spawn a sub-scope as a single task, allowing
+//     hierarchical error handling with independent policies.
+//
+// # Bounded Concurrency
+//
+// Use [WithLimit] to restrict the number of goroutines executing
+// concurrently within a scope. Tasks beyond the limit wait for a slot,
+// respecting context cancellation while waiting.
+//
+// For standalone use outside scopes, [Semaphore] provides a weighted
+// semaphore with [Semaphore.Acquire], [Semaphore.TryAcquire], and
+// [Semaphore.Release].
+//
+// # Worker Pool
+//
+// [Pool] provides a reusable fixed-size worker pool. Tasks are submitted
+// via [Pool.Submit] (blocking) or [Pool.TrySubmit] (non-blocking) and
+// processed by a fixed number of goroutines. Call [Pool.Close] to drain
+// the queue and collect errors.
+//
+// # Panic Recovery
+//
+// By default, a panic in any task is captured with its full stack trace
+// and re-raised in [Scope.Wait]. Use [WithPanicAsError] to convert panics
+// to [*PanicError] values and return them as regular errors instead.
+//
+// # Observability
+//
+// Register hooks for task lifecycle events:
+//
+//   - [WithOnStart]: called when each task begins executing.
+//   - [WithOnDone]: called when each task finishes, with error and duration.
+//   - [WithOnEvent]: unified hook receiving [TaskEvent] for every state
+//     change (started, done, errored, panicked, cancelled).
+//   - [WithOnMetrics]: periodic [Metrics] snapshots with counters for
+//     spawned, active, completed, errored, panicked, and cancelled tasks.
+//
 // # Streams
 //
-// [Stream] provides a pull-based, composable data pipeline. Chains of
-// [Stream.Filter], [Stream.Take], [Map], and [Batch] are evaluated lazily.
-// [ParallelMap] processes items concurrently with optional ordering.
-// Terminal methods ([Stream.ToSlice], [Stream.ForEach]) return partial results
-// alongside any error, following [io.Reader] conventions. Stream errors are
-// aggregated via [errors.Join].
+// [Stream] provides a pull-based, composable data pipeline. Create streams
+// with [NewStream], [FromSlice], [FromSliceUnsafe], [FromChan], or
+// [FromFunc]. Chains of [Stream.Filter], [Stream.Take], [Stream.Skip],
+// [Stream.Peek], [Map], [Batch], [FlatMap], and [Distinct] are evaluated
+// lazily. [Reduce] folds a stream into a single value.
+//
+// [ParallelMap] processes items concurrently with optional ordering and
+// backpressure via [StreamOptions.MaxPending].
+//
+// Terminal methods ([Stream.ToSlice], [Stream.ForEach], [Stream.Count])
+// return partial results alongside any error, following [io.Reader]
+// conventions. [Stream.ToChanScope] bridges a stream to a channel within
+// a scope. Stream errors are aggregated via [errors.Join].
+//
+// Streams are single-consumer; concurrent [Stream.Next] calls panic.
 //
 // # Spawner Lifetime
 //
@@ -45,23 +111,13 @@
 // after the task returns will panic. This is by design: structured
 // concurrency requires that all child tasks are scoped to their parent.
 //
-// # Bounded Concurrency
-//
-// Use [WithLimit] to restrict the number of goroutines executing
-// concurrently within a scope. Tasks beyond the limit wait for a slot,
-// respecting context cancellation while waiting.
-//
-// # Panic Recovery
-//
-// By default, a panic in any task is captured with its full stack trace
-// and re-raised in [Scope.Wait]. Use [WithPanicAsError] to convert panics
-// to [*PanicError] values and return them as regular errors instead.
-//
 // # Channel Utilities
 //
 // The [github.com/baxromumarov/scoped/chanx] subpackage provides
-// context-aware channel operations (Send, Recv, SendBatch, RecvBatch),
-// fan-in/fan-out patterns (Merge, Tee, FanOut), transformation pipelines
-// (Map, Filter), rate limiting (Throttle), batching (Buffer), racing
-// (First), and an idempotent-close channel wrapper (Closable).
+// context-aware channel operations (Send, Recv, TrySend, TryRecv,
+// SendTimeout, RecvTimeout, SendBatch, RecvBatch), fan-in/fan-out
+// patterns (Merge, Tee, FanOut, Broadcast), transformation pipelines
+// (Map, Filter), rate limiting (Throttle), batching (Buffer,
+// BufferWithReason), timing (Debounce, Window), combining (Zip, First),
+// and an idempotent-close channel wrapper (Closable).
 package scoped

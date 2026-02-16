@@ -8,11 +8,21 @@ import (
 
 // Spawner allows spawning concurrent tasks into a scope.
 type Spawner interface {
+	// Go starts a new concurrent task with the given name.
+	// This is the simplified form for tasks that don't need to spawn sub-tasks.
+	//
+	//	sp.Go("fetch", func(ctx context.Context) error {
+	//	    return fetch(ctx, url)
+	//	})
+	Go(name string, fn func(ctx context.Context) error)
+
 	// Spawn starts a new concurrent task with the given name.
 	//
 	// The task function receives a child [Spawner] allowing it to create sub-tasks.
 	// The child Spawner is only valid for the lifetime of the task function; storing
 	// it and calling Spawn after the task returns will panic.
+	//
+	// Use [Spawner.Go] for tasks that don't need nested spawning.
 	Spawn(name string, fn TaskFunc)
 }
 
@@ -21,6 +31,13 @@ type spawner struct {
 	s    *scope
 	mu   sync.Mutex // guards open
 	open bool
+}
+
+// Go implements Spawner.Go.
+func (sp *spawner) Go(name string, fn func(ctx context.Context) error) {
+	sp.Spawn(name, func(ctx context.Context, _ Spawner) error {
+		return fn(ctx)
+	})
 }
 
 // Spawn implements Spawner.Spawn.

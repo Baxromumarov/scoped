@@ -1084,3 +1084,134 @@ func TestChildSpawnerLifetime(t *testing.T) {
 		t.Fatal("expected panic from Spawn on closed child spawner")
 	}
 }
+
+// ---------- Spawner.Go tests ----------
+
+func TestGoBasic(t *testing.T) {
+	var result atomic.Int32
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		sp.Go("task-1", func(ctx context.Context) error {
+			result.Add(1)
+			return nil
+		})
+		sp.Go("task-2", func(ctx context.Context) error {
+			result.Add(2)
+			return nil
+		})
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := result.Load(); got != 3 {
+		t.Fatalf("expected result 3, got %d", got)
+	}
+}
+
+func TestGoReturnsError(t *testing.T) {
+	sentinel := fmt.Errorf("go-error")
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		sp.Go("failing", func(ctx context.Context) error {
+			return sentinel
+		})
+	})
+
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("expected sentinel error, got %v", err)
+	}
+}
+
+func TestGoContextCancellation(t *testing.T) {
+	started := make(chan struct{})
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		sp.Go("blocker", func(ctx context.Context) error {
+			return fmt.Errorf("fail-fast")
+		})
+		sp.Go("waiter", func(ctx context.Context) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	})
+
+	if err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestGoMixedWithSpawn(t *testing.T) {
+	var goRan, spawnRan atomic.Bool
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		sp.Go("simple", func(ctx context.Context) error {
+			goRan.Store(true)
+			return nil
+		})
+		sp.Spawn("nested", func(ctx context.Context, child scoped.Spawner) error {
+			child.Go("sub", func(ctx context.Context) error {
+				spawnRan.Store(true)
+				return nil
+			})
+			return nil
+		})
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !goRan.Load() {
+		t.Fatal("Go task should have run")
+	}
+	if !spawnRan.Load() {
+		t.Fatal("nested Go task should have run")
+	}
+}
+
+func TestGoPanicRecovery(t *testing.T) {
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		sp.Go("panicker", func(ctx context.Context) error {
+			panic("go-boom")
+		})
+	}, scoped.WithPanicAsError())
+
+	if err == nil {
+		t.Fatal("expected error from panic")
+	}
+	var pe *scoped.PanicError
+	if !errors.As(err, &pe) {
+		t.Fatalf("expected *PanicError, got %T: %v", err, err)
+	}
+}
+
+func TestGoWithLimit(t *testing.T) {
+	var peak atomic.Int32
+	var current atomic.Int32
+
+	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
+		for range 20 {
+			sp.Go("limited", func(ctx context.Context) error {
+				n := current.Add(1)
+				// Track peak concurrency.
+				for {
+					old := peak.Load()
+					if n <= old || peak.CompareAndSwap(old, n) {
+						break
+					}
+				}
+				time.Sleep(10 * time.Millisecond)
+				current.Add(-1)
+				return nil
+			})
+		}
+	}, scoped.WithLimit(3))
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := peak.Load(); got > 3 {
+		t.Fatalf("peak concurrency %d exceeded limit 3", got)
+	}
+}

@@ -99,10 +99,21 @@ func (p *Pool) runTask(fn func() error) {
 // Submit submits a task to the pool. It blocks if the queue is full.
 // Returns [ErrPoolClosed] if the pool has been closed.
 // Returns ctx.Err() if the pool's context is cancelled.
-func (p *Pool) Submit(fn func() error) error {
+func (p *Pool) Submit(fn func() error) (err error) {
 	if p.closed.Load() {
 		return ErrPoolClosed
 	}
+
+	// Guard against the race between the closed check above and
+	// Close() closing the tasks channel. If Close fires between the
+	// check and the send, the send panics; we recover and return
+	// ErrPoolClosed.
+	defer func() {
+		if r := recover(); r != nil {
+			err = ErrPoolClosed
+		}
+	}()
+
 	select {
 	case p.tasks <- fn:
 		return nil
@@ -113,10 +124,18 @@ func (p *Pool) Submit(fn func() error) error {
 
 // TrySubmit attempts to submit without blocking.
 // Returns false if the queue is full or the pool is closed.
-func (p *Pool) TrySubmit(fn func() error) bool {
+func (p *Pool) TrySubmit(fn func() error) (submitted bool) {
 	if p.closed.Load() {
 		return false
 	}
+
+	// Same TOCTOU guard as Submit.
+	defer func() {
+		if r := recover(); r != nil {
+			submitted = false
+		}
+	}()
+
 	select {
 	case p.tasks <- fn:
 		return true

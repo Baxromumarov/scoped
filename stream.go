@@ -207,7 +207,6 @@ func FromChan[T any](ch <-chan T) *Stream[T] {
 		var zero T
 
 		if ch == nil {
-			var zero T
 			return zero, io.EOF
 		}
 

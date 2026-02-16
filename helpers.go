@@ -169,10 +169,12 @@ func SpawnRetry(
 			delay := backoff
 			for attempt := 0; attempt <= n; attempt++ {
 				if attempt > 0 {
+					t := time.NewTimer(delay)
 					select {
-					case <-time.After(delay):
+					case <-t.C:
 						delay *= 2
 					case <-ctx.Done():
+						t.Stop()
 						return ctx.Err()
 					}
 				}

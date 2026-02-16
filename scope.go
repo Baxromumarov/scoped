@@ -350,13 +350,16 @@ func (sc *Scope) WaitTimeout(d time.Duration) error {
 	// Trigger finalization in a goroutine so we can select on timeout.
 	go sc.doFinalize()
 
+	t := time.NewTimer(d)
+	defer t.Stop()
+
 	select {
 	case <-sc.finDone:
 		if sc.panicVal != nil {
 			panic(sc.panicVal)
 		}
 		return sc.result
-	case <-time.After(d):
+	case <-t.C:
 		return context.DeadlineExceeded
 	}
 }

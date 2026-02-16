@@ -17,19 +17,28 @@ var (
 
 // Stream represents a structured, pull-based data stream.
 //
-// Note: Streams are single-consumer. Next() and other terminal methods
-// must not be called concurrently.
+// Streams are single-consumer. Next() and other terminal methods
+// must not be called concurrently. Concurrent calls to Next() will panic.
 type Stream[T any] struct {
 	next     func(ctx context.Context) (T, error)
 	err      error
 	stop     func()
 	stopOnce sync.Once
 	mu       sync.Mutex
+	active   atomic.Int32 // concurrent Next() detector
 }
 
 // Next returns the next item in the stream.
 // Returns io.EOF when the stream is exhausted.
+//
+// Next panics if called concurrently from multiple goroutines.
 func (s *Stream[T]) Next(ctx context.Context) (T, error) {
+	if s.active.Add(1) > 1 {
+		s.active.Add(-1)
+		panic("scoped: concurrent Stream.Next() calls detected; streams are single-consumer")
+	}
+	defer s.active.Add(-1)
+
 	val, err := s.next(ctx)
 	if err != nil && err != io.EOF {
 		s.setError(err)
@@ -125,6 +134,10 @@ type StreamOptions struct {
 	MaxWorkers int
 	BufferSize int
 	Ordered    bool
+	// MaxPending limits the number of out-of-order results buffered in ordered mode.
+	// When reached, the dispatcher blocks until the consumer catches up.
+	// 0 means default (MaxWorkers * 2). Ignored when Ordered is false.
+	MaxPending int
 }
 
 // NewStream creates a new stream from an iterator function.
@@ -301,15 +314,32 @@ func ParallelMap[A, B any](
 	if opts.MaxWorkers <= 0 {
 		opts.MaxWorkers = runtime.NumCPU() // default to number of logical CPUs if not set
 	}
+	if opts.MaxPending < 0 {
+		panic("scoped: ParallelMap requires non-negative MaxPending")
+	}
+
+	// Default MaxPending for ordered mode.
+	maxPending := opts.MaxPending
+	if opts.Ordered && maxPending == 0 {
+		maxPending = opts.MaxWorkers * 2
+	}
+
+	// Backpressure semaphore: limits out-of-order buffering in ordered mode.
+	var pendingSem chan struct{}
+	if opts.Ordered && maxPending > 0 {
+		pendingSem = make(chan struct{}, maxPending)
+	}
 
 	mapCtx, mapCancel := context.WithCancelCause(ctx)
-	resCh := make(chan indexedResult[B], opts.BufferSize+opts.MaxWorkers)
+	
+	resChanSize := opts.BufferSize + opts.MaxWorkers 
+	resCh := make(chan indexedResult[B], resChanSize)
 	out := &Stream[B]{
 		stop: func() {
 			mapCancel(context.Canceled)
 		},
 	}
-	out.next = makeParallelNext(out, opts, resCh)
+	out.next = makeParallelNext(out, opts, resCh, pendingSem)
 
 	sp.Spawn(
 		"parallel-map-dispatcher",
@@ -355,6 +385,20 @@ func ParallelMap[A, B any](
 				}
 
 				idx := inputIdx.Add(1) - 1
+
+				// Backpressure: in ordered mode, limit pending out-of-order items.
+				if pendingSem != nil {
+					select {
+					case pendingSem <- struct{}{}:
+					case <-runCtx.Done():
+						wg.Wait()
+						if ctx.Err() != nil {
+							return runCtx.Err()
+						}
+						return nil
+					}
+				}
+
 				wg.Add(1)
 
 				select {
@@ -379,7 +423,7 @@ func ParallelMap[A, B any](
 					func() {
 						defer func() {
 							if r := recover(); r != nil {
-								fnErr = fmt.Errorf("scoped: ParallelMap worker panicked: %v", r)
+								fnErr = newPanicError(r)
 							}
 						}()
 						res, fnErr = fn(runCtx, val)
@@ -406,15 +450,20 @@ func makeParallelNext[B any](
 	out *Stream[B],
 	opts StreamOptions,
 	resCh chan indexedResult[B],
+	pendingSem chan struct{}, // may be nil when unordered or unbounded
 ) func(context.Context) (B, error) {
 	var nextIdx int64
 	// For ordered mode, buffer out-of-order results in a map keyed by index.
-	// This avoids heap allocations (heap.Push/Pop box into any).
-	//
-	// NOTE: pending can grow up to the total stream size if an early item
-	// is slow while later items complete quickly. The practical bound is
-	// MaxWorkers + BufferSize for most workloads.
+	// When pendingSem is non-nil, the pending map is bounded by its capacity.
 	pending := make(map[int64]indexedResult[B])
+
+	// releasePending releases a slot on the backpressure semaphore,
+	// allowing the dispatcher to send more work.
+	releasePending := func() {
+		if pendingSem != nil {
+			<-pendingSem
+		}
+	}
 
 	return func(ctx context.Context) (B, error) {
 		for {
@@ -423,6 +472,7 @@ func makeParallelNext[B any](
 				if res, ok := pending[nextIdx]; ok {
 					delete(pending, nextIdx)
 					nextIdx++
+					releasePending()
 					if res.err != nil && res.err != io.EOF {
 						out.setError(res.err)
 					}
@@ -443,6 +493,7 @@ func makeParallelNext[B any](
 					if res, ok := pending[nextIdx]; ok {
 						delete(pending, nextIdx)
 						nextIdx++
+						releasePending()
 						if res.err != nil && res.err != io.EOF {
 							out.setError(res.err)
 						}
@@ -627,5 +678,105 @@ func (s *Stream[T]) Count(ctx context.Context) (int, error) {
 		}
 
 		count++
+	}
+}
+
+// Reduce folds the stream into a single value using the given accumulator function.
+// On error, the partial accumulation so far is returned alongside the error.
+func Reduce[T, R any](ctx context.Context, s *Stream[T], initial R, fn func(R, T) R) (R, error) {
+	if s == nil {
+		panic("scoped: Reduce requires non-nil source stream")
+	}
+	if fn == nil {
+		panic("scoped: Reduce requires non-nil accumulator")
+	}
+	defer s.stopNow()
+
+	acc := initial
+	for {
+		val, err := s.Next(ctx)
+		if err == io.EOF {
+			return acc, s.Err()
+		}
+		if err != nil {
+			return acc, err
+		}
+		acc = fn(acc, val)
+	}
+}
+
+// FlatMap transforms each item in the source stream into a sub-stream and
+// concatenates all sub-streams sequentially. Each sub-stream is fully consumed
+// before moving to the next source item.
+//
+// Nil sub-streams returned by fn are skipped.
+func FlatMap[A, B any](s *Stream[A], fn func(context.Context, A) *Stream[B]) *Stream[B] {
+	if s == nil {
+		panic("scoped: FlatMap requires non-nil source stream")
+	}
+	if fn == nil {
+		panic("scoped: FlatMap requires non-nil mapper")
+	}
+
+	var current *Stream[B]
+
+	return &Stream[B]{
+		next: func(ctx context.Context) (B, error) {
+			for {
+				// Try reading from current sub-stream.
+				if current != nil {
+					val, err := current.Next(ctx)
+					if err == io.EOF {
+						current.stopNow()
+						current = nil
+						continue
+					}
+					return val, err
+				}
+
+				// Get next source item.
+				srcVal, err := s.Next(ctx)
+				if err != nil {
+					var zero B
+					return zero, err
+				}
+
+				// Create sub-stream for this source item.
+				current = fn(ctx, srcVal)
+				// nil sub-streams are skipped.
+			}
+		},
+		stop: func() {
+			if current != nil {
+				current.stopNow()
+			}
+			s.stopNow()
+		},
+	}
+}
+
+// Distinct returns a stream that suppresses duplicate items.
+// Items are compared by value equality. T must be comparable.
+func Distinct[T comparable](s *Stream[T]) *Stream[T] {
+	if s == nil {
+		panic("scoped: Distinct requires non-nil source stream")
+	}
+
+	seen := make(map[T]struct{})
+
+	return &Stream[T]{
+		next: func(ctx context.Context) (T, error) {
+			for {
+				val, err := s.Next(ctx)
+				if err != nil {
+					return val, err
+				}
+				if _, exists := seen[val]; !exists {
+					seen[val] = struct{}{}
+					return val, nil
+				}
+			}
+		},
+		stop: s.stopNow,
 	}
 }

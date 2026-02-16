@@ -584,8 +584,16 @@ func TestClosable_SendCloseRaceNoLostMessages(t *testing.T) {
 	// Close the channel
 	c.Close()
 
-	// Verify all sent values are still buffered (we sent 50 to a capacity 100 channel)
-	assert.Equal(t, 50, c.Len())
+	// After close, Len() returns 0, but items are still drainable.
+	assert.Equal(t, 0, c.Len())
+
+	// Verify all 50 items are still drainable from Chan().
+	var drained []int
+	for range 50 {
+		v := <-c.Chan()
+		drained = append(drained, v)
+	}
+	assert.Len(t, drained, 50)
 }
 
 // Benchmarks for performance validation

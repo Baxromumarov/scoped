@@ -97,3 +97,113 @@ func Buffer[T any](
 	}()
 	return out
 }
+
+// FlushReason indicates why a batch was flushed.
+type FlushReason int
+
+const (
+	// FlushSize means the batch reached the configured max size.
+	FlushSize FlushReason = iota
+	// FlushTimeout means the timeout elapsed since the first item in the batch.
+	FlushTimeout
+	// FlushClose means the input channel was closed with a partial batch remaining.
+	FlushClose
+)
+
+// BatchResult holds a flushed batch and the reason it was flushed.
+type BatchResult[T any] struct {
+	Items  []T
+	Reason FlushReason
+}
+
+// BufferWithReason works like [Buffer] but includes the [FlushReason]
+// with each emitted batch.
+//
+// BufferWithReason panics if size is not positive or timeout is not positive.
+// If in is nil, returns a closed channel immediately.
+func BufferWithReason[T any](
+	ctx context.Context,
+	in <-chan T,
+	size int,
+	timeout time.Duration,
+) <-chan BatchResult[T] {
+	if size <= 0 {
+		panic("chanx: BufferWithReason requires size > 0")
+	}
+	if timeout <= 0 {
+		panic("chanx: BufferWithReason requires timeout > 0")
+	}
+
+	out := make(chan BatchResult[T])
+
+	if in == nil {
+		close(out)
+		return out
+	}
+
+	go func() {
+		defer close(out)
+
+		batch := make([]T, 0, size)
+		var timer *time.Timer
+		var timerC <-chan time.Time
+
+		flush := func(reason FlushReason) bool {
+			if len(batch) == 0 {
+				return true
+			}
+			select {
+			case out <- BatchResult[T]{
+				Items:  batch,
+				Reason: reason,
+			}:
+			case <-ctx.Done():
+				return false
+			}
+			batch = make([]T, 0, size)
+			if timer != nil {
+				timer.Stop()
+				timerC = nil
+			}
+			return true
+		}
+
+		defer func() {
+			if len(batch) > 0 {
+				select {
+				case out <- BatchResult[T]{
+					Items:  batch,
+					Reason: FlushClose,
+				}:
+				case <-ctx.Done():
+				}
+			}
+		}()
+
+		for {
+			select {
+			case v, ok := <-in:
+				if !ok {
+					return
+				}
+				batch = append(batch, v)
+				if len(batch) == 1 {
+					timer = time.NewTimer(timeout)
+					timerC = timer.C
+				}
+				if len(batch) >= size {
+					if !flush(FlushSize) {
+						return
+					}
+				}
+			case <-timerC:
+				if !flush(FlushTimeout) {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}

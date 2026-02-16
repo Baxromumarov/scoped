@@ -64,14 +64,26 @@ type TaskEvent struct {
 	Duration time.Duration // wall-clock time; zero for EventStarted
 }
 
+// Metrics provides aggregated counters for a scope's lifecycle.
+type Metrics struct {
+	TotalSpawned int64
+	ActiveTasks  int64
+	Completed    int64
+	Errored      int64
+	Panicked     int64
+	Cancelled    int64
+}
+
 type config struct {
-	policy     Policy
-	limit      int
-	maxErrors  int // 0 = unlimited (default)
-	panicAsErr bool
-	onStart    func(TaskInfo)
-	onDone     func(TaskInfo, error, time.Duration)
-	onEvent    func(TaskEvent)
+	policy          Policy
+	limit           int
+	maxErrors       int // 0 = unlimited (default)
+	panicAsErr      bool
+	onStart         func(TaskInfo)
+	onDone          func(TaskInfo, error, time.Duration)
+	onEvent         func(TaskEvent)
+	onMetrics       func(Metrics)
+	metricsInterval time.Duration
 }
 
 // Option configures a [Scope].
@@ -162,5 +174,22 @@ func WithOnDone(fn func(TaskInfo, error, time.Duration)) Option {
 func WithOnEvent(fn func(TaskEvent)) Option {
 	return func(c *config) {
 		c.onEvent = fn
+	}
+}
+
+// WithOnMetrics registers a periodic metrics callback that fires every interval.
+// The callback receives a snapshot of current scope counters.
+//
+// Panics if interval <= 0 or fn is nil.
+func WithOnMetrics(interval time.Duration, fn func(Metrics)) Option {
+	if interval <= 0 {
+		panic("scoped: WithOnMetrics requires interval > 0")
+	}
+	if fn == nil {
+		panic("scoped: WithOnMetrics requires non-nil callback")
+	}
+	return func(c *config) {
+		c.onMetrics = fn
+		c.metricsInterval = interval
 	}
 }

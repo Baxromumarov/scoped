@@ -141,8 +141,15 @@ func (c *Closable[T]) IsClosed() bool {
 }
 
 // Len returns the number of items currently buffered in the channel.
+// After Close() is called, Len returns 0 even if buffered items remain
+// drainable from Chan(). This reflects the logical state from a sender's
+// perspective.
+//
 // Note: This is for informational purposes only and the value may be
 // stale in concurrent contexts.
 func (c *Closable[T]) Len() int {
+	if c.isClosed.Load() {
+		return 0
+	}
 	return len(c.ch)
 }

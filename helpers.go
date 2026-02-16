@@ -125,8 +125,8 @@ func SpawnTimeout(sp Spawner, name string, d time.Duration, fn TaskFunc) {
 // inside a parent scope using [FailFast]:
 //
 //	scoped.Run(
-// 		ctx, 
-// 		func(sp scoped.Spawner) {
+//		ctx,
+//		func(sp scoped.Spawner) {
 //	    scoped.SpawnScope(sp, "batch", func(sub scoped.Spawner) {
 //	        for _, item := range items {
 //	            sub.Spawn(item.Name, item.Process)
@@ -138,6 +138,50 @@ func SpawnScope(sp Spawner, name string, fn func(sp Spawner), opts ...Option) {
 		name,
 		func(ctx context.Context, _ Spawner) error {
 			return Run(ctx, fn, opts...)
+		},
+	)
+}
+
+// SpawnRetry spawns a task that retries on failure up to n times with
+// exponential backoff starting from the given base duration.
+// The backoff doubles on each retry: base, base*2, base*4, ...
+// Retries stop immediately if the context is cancelled.
+//
+// SpawnRetry panics if n < 0 or backoff <= 0.
+func SpawnRetry(
+	sp Spawner,
+	name string,
+	n int,
+	backoff time.Duration,
+	fn TaskFunc,
+) {
+	if n < 0 {
+		panic("scoped: SpawnRetry requires n >= 0")
+	}
+	if backoff <= 0 {
+		panic("scoped: SpawnRetry requires backoff > 0")
+	}
+
+	sp.Spawn(
+		name,
+		func(ctx context.Context, child Spawner) error {
+			var lastErr error
+			delay := backoff
+			for attempt := 0; attempt <= n; attempt++ {
+				if attempt > 0 {
+					select {
+					case <-time.After(delay):
+						delay *= 2
+					case <-ctx.Done():
+						return ctx.Err()
+					}
+				}
+				lastErr = fn(ctx, child)
+				if lastErr == nil {
+					return nil
+				}
+			}
+			return lastErr
 		},
 	)
 }

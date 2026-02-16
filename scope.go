@@ -64,6 +64,13 @@ type scope struct {
 	// Observability counters.
 	totalSpawned atomic.Int64
 	activeTasks  atomic.Int64
+	completed    atomic.Int64
+	errored      atomic.Int64
+	panicked     atomic.Int64
+	cancelled    atomic.Int64
+
+	// Metrics ticker cleanup.
+	stopMetrics func()
 }
 
 // Run creates a [Scope], invokes fn with its root [Spawner], then waits for
@@ -105,6 +112,11 @@ func Run(parent context.Context, fn func(sp Spawner), opts ...Option) (err error
 func (s *scope) finalize() (error, *PanicError) {
 	s.finOnce.Do(func() {
 		s.wg.Wait()
+
+		// Stop metrics ticker if running.
+		if s.stopMetrics != nil {
+			s.stopMetrics()
+		}
 
 		// Check if context was cancelled externally (before cleanup).
 		ctxWasCancelled := s.ctx.Err() != nil
@@ -175,24 +187,28 @@ func (s *scope) emitEvent(e TaskEvent) {
 	}
 }
 
-// emitCompletionEvent determines the correct EventKind for a completed task
-// and emits the event via the onEvent hook.
+// emitCompletionEvent determines the correct EventKind for a completed task,
+// increments metrics counters, and emits the event via the onEvent hook.
 func (s *scope) emitCompletionEvent(info TaskInfo, err error, d time.Duration) {
-	if s.cfg.onEvent == nil {
-		return
-	}
-
 	var kind EventKind
-	
+
 	switch {
 	case err == nil:
 		kind = EventDone
+		s.completed.Add(1)
 	case errors.As(err, new(*PanicError)):
 		kind = EventPanicked
+		s.panicked.Add(1)
 	case s.ctx.Err() != nil:
 		kind = EventCancelled
+		s.cancelled.Add(1)
 	default:
 		kind = EventErrored
+		s.errored.Add(1)
+	}
+
+	if s.cfg.onEvent == nil {
+		return
 	}
 
 	s.cfg.onEvent(TaskEvent{
@@ -235,6 +251,7 @@ type Scope struct {
 	s        *scope
 	root     *spawner
 	once     sync.Once
+	finDone  chan struct{} // closed when finalization completes
 	result   error
 	panicVal *PanicError
 }
@@ -262,17 +279,52 @@ func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 		s.sem = make(chan struct{}, cfg.limit)
 	}
 
+	// Start metrics ticker if configured.
+	if cfg.onMetrics != nil {
+		stop := make(chan struct{})
+		s.stopMetrics = func() { close(stop) }
+		go func() {
+			ticker := time.NewTicker(cfg.metricsInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					cfg.onMetrics(Metrics{
+						TotalSpawned: s.totalSpawned.Load(),
+						ActiveTasks:  s.activeTasks.Load(),
+						Completed:    s.completed.Load(),
+						Errored:      s.errored.Load(),
+						Panicked:     s.panicked.Load(),
+						Cancelled:    s.cancelled.Load(),
+					})
+				case <-stop:
+					return
+				}
+			}
+		}()
+	}
+
 	root := &spawner{
 		s:    s,
 		open: true,
 	}
 
 	sc := &Scope{
-		s:    s,
-		root: root,
+		s:       s,
+		root:    root,
+		finDone: make(chan struct{}),
 	}
 
 	return sc, root
+}
+
+// doFinalize triggers scope finalization exactly once and signals finDone.
+func (sc *Scope) doFinalize() {
+	sc.once.Do(func() {
+		sc.root.close()
+		sc.result, sc.panicVal = sc.s.finalize()
+		close(sc.finDone)
+	})
 }
 
 // Wait closes the root [Spawner], waits for all spawned tasks to complete,
@@ -281,15 +333,32 @@ func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 //
 // Wait is idempotent; subsequent calls return the same result.
 func (sc *Scope) Wait() error {
-	sc.once.Do(func() {
-		sc.root.close()
-		sc.result, sc.panicVal = sc.s.finalize()
-	})
+	sc.doFinalize()
 
 	if sc.panicVal != nil {
 		panic(sc.panicVal)
 	}
 	return sc.result
+}
+
+// WaitTimeout is like [Wait] but returns [context.DeadlineExceeded] if the
+// timeout expires before all tasks finish. The scope is NOT cancelled on
+// timeout — call [Scope.Cancel] explicitly if needed.
+//
+// WaitTimeout is safe to call alongside [Wait]; finalization runs at most once.
+func (sc *Scope) WaitTimeout(d time.Duration) error {
+	// Trigger finalization in a goroutine so we can select on timeout.
+	go sc.doFinalize()
+
+	select {
+	case <-sc.finDone:
+		if sc.panicVal != nil {
+			panic(sc.panicVal)
+		}
+		return sc.result
+	case <-time.After(d):
+		return context.DeadlineExceeded
+	}
 }
 
 // Cancel cancels the scope's context with the given cause, signaling all

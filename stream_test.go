@@ -637,7 +637,7 @@ func TestMakeParallelNextBranches(t *testing.T) {
 		out := &Stream[int]{}
 		ch := make(chan indexedResult[int])
 		close(ch)
-		next := makeParallelNext(out, StreamOptions{}, ch)
+		next := makeParallelNext(out, StreamOptions{}, ch, make(chan struct{}))
 		_, err := next(context.Background())
 		if err != io.EOF {
 			t.Fatalf("expected EOF, got %v", err)
@@ -647,7 +647,7 @@ func TestMakeParallelNextBranches(t *testing.T) {
 	t.Run("context canceled while waiting", func(t *testing.T) {
 		out := &Stream[int]{}
 		ch := make(chan indexedResult[int])
-		next := makeParallelNext(out, StreamOptions{}, ch)
+		next := makeParallelNext(out, StreamOptions{}, ch, make(chan struct{}))
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		_, err := next(ctx)
@@ -661,7 +661,7 @@ func TestMakeParallelNextBranches(t *testing.T) {
 		ch := make(chan indexedResult[int], 1)
 		ch <- indexedResult[int]{idx: 1, val: 10}
 		close(ch)
-		next := makeParallelNext(out, StreamOptions{Ordered: true}, ch)
+		next := makeParallelNext(out, StreamOptions{Ordered: true}, ch, make(chan struct{}))
 		_, err := next(context.Background())
 		if !errors.Is(err, ErrStreamGap) {
 			t.Fatalf("expected ErrStreamGap, got %v", err)
@@ -677,7 +677,7 @@ func TestMakeParallelNextBranches(t *testing.T) {
 		ch := make(chan indexedResult[int], 1)
 		ch <- indexedResult[int]{idx: 2, err: sentinel}
 		close(ch)
-		next := makeParallelNext(out, StreamOptions{Ordered: true}, ch)
+		next := makeParallelNext(out, StreamOptions{Ordered: true}, ch, make(chan struct{}))
 		_, err := next(context.Background())
 		if !errors.Is(err, sentinel) {
 			t.Fatalf("expected %v, got %v", sentinel, err)
@@ -749,8 +749,9 @@ func TestParallelMapWorkerPanicRecovery(t *testing.T) {
 		if streamErr == nil {
 			t.Fatal("expected error from panicking worker")
 		}
-		if !strings.Contains(streamErr.Error(), "panicked") {
-			t.Fatalf("expected panic error, got %v", streamErr)
+		var pe *PanicError
+		if !errors.As(streamErr, &pe) {
+			t.Fatalf("expected *PanicError, got %T: %v", streamErr, streamErr)
 		}
 	})
 	if err != nil {

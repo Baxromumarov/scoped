@@ -2,7 +2,6 @@ package scoped
 
 import (
 	"context"
-	"fmt"
 	"sync/atomic"
 	"time"
 )
@@ -21,20 +20,35 @@ func ForEachSlice[T any](
 	fn func(ctx context.Context, item T) error,
 	opts ...Option,
 ) error {
-	return Run(
-		ctx,
-		func(sp Spawner) {
-			for i, item := range items {
-				sp.Spawn(
-					fmt.Sprintf("for-each [%d]", i),
-					func(ctx context.Context, _ Spawner) error {
-						return fn(ctx, item)
-					},
-				)
-			}
-		},
-		opts...,
-	)
+	sc, sp := New(ctx, opts...)
+
+	if shouldUseWorkerFastPath(sc.s.cfg, len(items)) {
+		workers := workerCount(sc.s.cfg.limit, len(items))
+		for worker := range workers {
+			start := worker
+			sp.Go("", func(ctx context.Context) error {
+				for i := start; i < len(items); i += workers {
+					// Stop dispatch quickly once fail-fast cancellation is triggered.
+					if ctx.Err() != nil {
+						return nil
+					}
+					if err := fn(ctx, items[i]); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		}
+		return sc.Wait()
+	}
+
+	for _, item := range items {
+		sp.Go("", func(ctx context.Context) error {
+			return fn(ctx, item)
+		})
+	}
+
+	return sc.Wait()
 }
 
 // ItemResult holds the outcome of processing an individual item in [MapSlice].
@@ -76,10 +90,30 @@ func MapSlice[T, R any](
 	policy := sc.s.cfg.policy
 	results := make([]ItemResult[R], len(items))
 
-	for i, item := range items {
-		sp.Spawn(
-			fmt.Sprintf("map[%d]", i),
-			func(ctx context.Context, _ Spawner) error {
+	if shouldUseWorkerFastPath(sc.s.cfg, len(items)) {
+		workers := workerCount(sc.s.cfg.limit, len(items))
+		for worker := range workers {
+			start := worker
+			sp.Go("", func(ctx context.Context) error {
+				for i := start; i < len(items); i += workers {
+					// Stop dispatch quickly once fail-fast cancellation is triggered.
+					if ctx.Err() != nil {
+						return nil
+					}
+
+					r, err := fn(ctx, items[i])
+					if err != nil {
+						results[i].Err = err // safe: each worker writes disjoint indices
+						return err
+					}
+					results[i].Value = r // safe: each worker writes disjoint indices
+				}
+				return nil
+			})
+		}
+	} else {
+		for i, item := range items {
+			sp.Go("", func(ctx context.Context) error {
 				r, err := fn(ctx, item)
 				if err != nil {
 					results[i].Err = err // safe: each goroutine writes a unique index
@@ -90,8 +124,8 @@ func MapSlice[T, R any](
 				}
 				results[i].Value = r // safe: each goroutine writes a unique index
 				return nil
-			},
-		)
+			})
+		}
 	}
 
 	err := sc.Wait()
@@ -102,6 +136,32 @@ func MapSlice[T, R any](
 		return results, err
 	}
 	return results, nil
+}
+
+// shouldUseWorkerFastPath enables a low-overhead worker model for helpers.
+// It intentionally only activates when task-level observability is disabled,
+// preserving per-item task semantics for hooks and tracking features.
+func shouldUseWorkerFastPath(cfg config, itemCount int) bool {
+	if itemCount == 0 {
+		return false
+	}
+	if cfg.limit <= 0 || cfg.policy != FailFast {
+		return false
+	}
+	if cfg.onStart != nil || cfg.onDone != nil || cfg.onEvent != nil {
+		return false
+	}
+	if cfg.onMetrics != nil || cfg.trackTasks || cfg.onStall != nil {
+		return false
+	}
+	return true
+}
+
+func workerCount(limit, itemCount int) int {
+	if limit <= 0 || limit > itemCount {
+		return itemCount
+	}
+	return limit
 }
 
 // SpawnTimeout spawns a task with a per-task deadline. If the task does not

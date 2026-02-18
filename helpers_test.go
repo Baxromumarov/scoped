@@ -178,6 +178,23 @@ func TestForEachSlice(t *testing.T) {
 			t.Errorf("expected 1 done call, got %d", doneCalled)
 		}
 	})
+
+	t.Run("with hooks and limit keeps per-item events", func(t *testing.T) {
+		startCalled := 0
+		doneCalled := 0
+		err := ForEachSlice(context.Background(), []int{1, 2, 3}, func(ctx context.Context, item int) error {
+			return nil
+		}, WithLimit(2), WithOnStart(func(TaskInfo) { startCalled++ }), WithOnDone(func(TaskInfo, error, time.Duration) { doneCalled++ }))
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if startCalled != 3 {
+			t.Errorf("expected 3 start calls, got %d", startCalled)
+		}
+		if doneCalled != 3 {
+			t.Errorf("expected 3 done calls, got %d", doneCalled)
+		}
+	})
 }
 
 func TestMapSlice(t *testing.T) {
@@ -322,6 +339,26 @@ func TestMapSlice(t *testing.T) {
 		var pe *PanicError
 		if !errors.As(err, &pe) {
 			t.Errorf("expected PanicError, got %T", err)
+		}
+	})
+
+	t.Run("with hooks and limit keeps per-item events", func(t *testing.T) {
+		startCalled := 0
+		doneCalled := 0
+		results, err := MapSlice(context.Background(), []int{1, 2, 3}, func(ctx context.Context, item int) (int, error) {
+			return item * 2, nil
+		}, WithLimit(2), WithOnStart(func(TaskInfo) { startCalled++ }), WithOnDone(func(TaskInfo, error, time.Duration) { doneCalled++ }))
+		if err != nil {
+			t.Errorf("expected no error, got %v", err)
+		}
+		if len(results) != 3 {
+			t.Errorf("expected 3 results, got %d", len(results))
+		}
+		if startCalled != 3 {
+			t.Errorf("expected 3 start calls, got %d", startCalled)
+		}
+		if doneCalled != 3 {
+			t.Errorf("expected 3 done calls, got %d", doneCalled)
 		}
 	})
 }

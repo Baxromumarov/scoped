@@ -1,3 +1,7 @@
 scoped.test
 *.out
 coverage.txt
+.idea/
+.vscode/
+.claude
+.gitignore

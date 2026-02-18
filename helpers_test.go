@@ -180,19 +180,19 @@ func TestForEachSlice(t *testing.T) {
 	})
 
 	t.Run("with hooks and limit keeps per-item events", func(t *testing.T) {
-		startCalled := 0
-		doneCalled := 0
+		var startCalled atomic.Int32
+		var doneCalled atomic.Int32
 		err := ForEachSlice(context.Background(), []int{1, 2, 3}, func(ctx context.Context, item int) error {
 			return nil
-		}, WithLimit(2), WithOnStart(func(TaskInfo) { startCalled++ }), WithOnDone(func(TaskInfo, error, time.Duration) { doneCalled++ }))
+		}, WithLimit(2), WithOnStart(func(TaskInfo) { startCalled.Add(1) }), WithOnDone(func(TaskInfo, error, time.Duration) { doneCalled.Add(1) }))
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
-		if startCalled != 3 {
-			t.Errorf("expected 3 start calls, got %d", startCalled)
+		if got := startCalled.Load(); got != 3 {
+			t.Errorf("expected 3 start calls, got %d", got)
 		}
-		if doneCalled != 3 {
-			t.Errorf("expected 3 done calls, got %d", doneCalled)
+		if got := doneCalled.Load(); got != 3 {
+			t.Errorf("expected 3 done calls, got %d", got)
 		}
 	})
 }
@@ -343,22 +343,22 @@ func TestMapSlice(t *testing.T) {
 	})
 
 	t.Run("with hooks and limit keeps per-item events", func(t *testing.T) {
-		startCalled := 0
-		doneCalled := 0
+		var startCalled atomic.Int32
+		var doneCalled atomic.Int32
 		results, err := MapSlice(context.Background(), []int{1, 2, 3}, func(ctx context.Context, item int) (int, error) {
 			return item * 2, nil
-		}, WithLimit(2), WithOnStart(func(TaskInfo) { startCalled++ }), WithOnDone(func(TaskInfo, error, time.Duration) { doneCalled++ }))
+		}, WithLimit(2), WithOnStart(func(TaskInfo) { startCalled.Add(1) }), WithOnDone(func(TaskInfo, error, time.Duration) { doneCalled.Add(1) }))
 		if err != nil {
 			t.Errorf("expected no error, got %v", err)
 		}
 		if len(results) != 3 {
 			t.Errorf("expected 3 results, got %d", len(results))
 		}
-		if startCalled != 3 {
-			t.Errorf("expected 3 start calls, got %d", startCalled)
+		if got := startCalled.Load(); got != 3 {
+			t.Errorf("expected 3 start calls, got %d", got)
 		}
-		if doneCalled != 3 {
-			t.Errorf("expected 3 done calls, got %d", doneCalled)
+		if got := doneCalled.Load(); got != 3 {
+			t.Errorf("expected 3 done calls, got %d", got)
 		}
 	})
 }

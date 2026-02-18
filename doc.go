@@ -77,6 +77,14 @@
 // and re-raised in [Scope.Wait]. Use [WithPanicAsError] to convert panics
 // to [*PanicError] values and return them as regular errors instead.
 //
+// # Panic Contract
+//
+// This package intentionally panics for programmer misuse (invalid options,
+// nil required callbacks, invalid lifecycle calls such as spawning after
+// shutdown, or concurrent [Stream.Next] calls). These panics enforce API
+// invariants and are considered contract violations, not recoverable runtime
+// data errors.
+//
 // # Observability
 //
 // Register hooks for task lifecycle events:

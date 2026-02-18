@@ -93,6 +93,20 @@ By default, panics are re-raised in `Wait()`. Use `WithPanicAsError()` to conver
 scoped.Run(ctx, fn, scoped.WithPanicAsError())
 ```
 
+### Panic Contract
+
+`scoped` intentionally panics for programmer misuse (invalid arguments or invalid lifecycle usage), for example:
+
+- Calling `Spawn` on a closed spawner.
+- Calling stream `Next()` concurrently.
+- Passing invalid option values (negative limits, nil required callbacks, etc.).
+
+These panics are API contract checks, not runtime data-path errors.
+Task-function panics are handled separately:
+
+- Default behavior: panic is captured and re-raised at `Wait()`.
+- `WithPanicAsError()`: panic is converted to `*PanicError` and returned as an error.
+
 ## Helpers
 
 ### `ForEachSlice` — Parallel iteration
@@ -454,4 +468,8 @@ go get github.com/baxromumarov/scoped/chanx
 
 ## License
 
-MIT License — Copyright (c) 2026 Baxrom Umarov
+Licensed under MIT. See `LICENSE`.
+
+## Release Process
+
+Release checklist and tagging steps are in `RELEASE.md`.

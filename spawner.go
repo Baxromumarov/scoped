@@ -76,6 +76,13 @@ func (sp *spawner) Spawn(name string, fn TaskFunc) {
 			}
 		}
 
+		// Register task for tracking after semaphore acquire
+		// (so waiting for a slot doesn't count as "running").
+		if sp.s.trackTasks {
+			taskID := sp.s.registerTask(name)
+			defer sp.s.unregisterTask(taskID)
+		}
+
 		if sp.s.ctx.Err() != nil {
 			// Context already cancelled, skip execution silently.
 			sp.s.emitEvent(TaskEvent{Kind: EventCancelled, Task: info})
@@ -89,7 +96,7 @@ func (sp *spawner) Spawn(name string, fn TaskFunc) {
 			open: true,
 		}
 
-		needsTiming := sp.s.cfg.onDone != nil || sp.s.cfg.onEvent != nil
+		needsTiming := sp.s.cfg.onDone != nil || sp.s.cfg.onEvent != nil || sp.s.trackTasks
 
 		var start time.Time
 		if needsTiming {

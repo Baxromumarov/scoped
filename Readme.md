@@ -152,6 +152,18 @@ scoped.SpawnRetry(sp, "flaky-api", 3, 100*time.Millisecond,
 // Backoff: 100ms, 200ms, 400ms
 ```
 
+### `Race` — First successful result
+
+Run multiple tasks concurrently, return the first successful result, cancel the rest:
+
+```go
+val, err := scoped.Race(ctx,
+    func(ctx context.Context) (string, error) { return fetchFromA(ctx) },
+    func(ctx context.Context) (string, error) { return fetchFromB(ctx) },
+    func(ctx context.Context) (string, error) { return fetchFromC(ctx) },
+)
+```
+
 ### `SpawnScope` — Sub-scopes
 
 Run a group of tasks with an independent error policy inside a parent scope:
@@ -221,10 +233,72 @@ Legacy per-phase hooks are also available via `WithOnStart` and `WithOnDone`.
 ```go
 scoped.Run(ctx, fn,
     scoped.WithOnMetrics(time.Second, func(m scoped.Metrics) {
-        fmt.Printf("active=%d completed=%d errored=%d\n",
-            m.ActiveTasks, m.Completed, m.Errored)
+        fmt.Printf("active=%d completed=%d errored=%d longest=%s\n",
+            m.ActiveTasks, m.Completed, m.Errored, m.LongestActive)
     }),
 )
+```
+
+### Stall detection
+
+Detect tasks running longer than a threshold (purely observational — does not cancel):
+
+```go
+scoped.Run(ctx, fn,
+    scoped.WithStallDetector(5*time.Second, func(rt scoped.RunningTask) {
+        log.Printf("STALLED: task=%q running for %s", rt.Name, rt.Elapsed)
+    }),
+)
+```
+
+### Scope snapshots
+
+Get a point-in-time view of all running tasks:
+
+```go
+sc, sp := scoped.New(ctx, scoped.WithTaskTracking())
+// ... spawn tasks ...
+snap := sc.Snapshot()
+for _, rt := range snap.RunningTasks {
+    fmt.Printf("  %s running for %s\n", rt.Name, rt.Elapsed)
+}
+fmt.Printf("longest active: %s\n", snap.LongestActive)
+```
+
+### Pool monitoring
+
+```go
+pool := scoped.NewPool(ctx, 4,
+    scoped.WithPoolMetrics(time.Second, func(s scoped.PoolStats) {
+        fmt.Printf("submitted=%d inflight=%d queue=%d\n",
+            s.Submitted, s.InFlight, s.QueueDepth)
+    }),
+)
+
+// Or poll on demand:
+stats := pool.Stats()
+```
+
+### Stream monitoring
+
+Streams track items, errors, and throughput automatically:
+
+```go
+s := scoped.FromSlice(items)
+// ... consume stream ...
+stats := s.Stats()
+fmt.Printf("read=%d errors=%d throughput=%.0f items/sec\n",
+    stats.ItemsRead, stats.Errors, stats.Throughput)
+```
+
+For per-item event hooks:
+
+```go
+observed := scoped.Observe(stream, func(e scoped.StreamEvent[int]) {
+    if e.Err != nil {
+        log.Printf("stream error at seq %d: %v", e.Seq, e.Err)
+    }
+})
 ```
 
 ## Streams
@@ -239,6 +313,9 @@ s := scoped.FromChan(ch)
 s := scoped.NewStream(func(ctx context.Context) (int, error) {
     // custom iterator — return io.EOF when done
 })
+s := scoped.Empty[int]()              // immediate EOF
+s := scoped.Repeat("hello", 5)       // emit "hello" 5 times (-1 = infinite)
+s := scoped.Generate(1, func(v int) int { return v * 2 }) // 1, 2, 4, 8, ...
 ```
 
 ### Chaining operations
@@ -248,6 +325,8 @@ results, err := scoped.FromSlice(items).
     Filter(func(v int) bool { return v > 0 }).
     Skip(10).
     Take(100).
+    TakeWhile(func(v int) bool { return v < 500 }).
+    DropWhile(func(v int) bool { return v < 50 }).
     Peek(func(v int) { log.Println(v) }).
     ToSlice(ctx)
 ```
@@ -270,6 +349,12 @@ flat := scoped.FlatMap(stream, func(ctx context.Context, v int) *scoped.Stream[s
     return scoped.FromSlice(strings.Split(fmt.Sprint(v), ""))
 })
 unique := scoped.Distinct(stream)            // requires comparable
+
+scan := scoped.Scan(stream, 0,               // running fold
+    func(acc, v int) int { return acc + v },
+)
+
+zipped := scoped.Zip(streamA, streamB)       // *Stream[Pair[A, B]]
 ```
 
 ### `ParallelMap` — Concurrent stream transformation
@@ -293,6 +378,10 @@ results, err := out.ToSlice(ctx)
 | `ToSlice(ctx)` | Collect all items into a slice |
 | `ForEach(ctx, fn)` | Apply a function to each item |
 | `Count(ctx)` | Count items in the stream |
+| `First(ctx)` | Return the first item |
+| `Last(ctx)` | Consume all, return the last item |
+| `Any(ctx, fn)` | True if any item matches predicate |
+| `All(ctx, fn)` | True if all items match predicate |
 | `ToChanScope(sp)` | Bridge to a channel within a scope |
 | `Stop()` | Release resources (safe to call multiple times) |
 
@@ -328,6 +417,10 @@ go get github.com/baxromumarov/scoped/chanx
 |----------|-------------|
 | `Map` | Transform values through a pipeline |
 | `Filter` | Pass only values matching a predicate |
+| `Take` | Forward first n items then close |
+| `Skip` | Drop first n items then forward rest |
+| `Scan` | Running accumulation of input values |
+| `Partition` | Split by predicate into two channels (both must be read concurrently) |
 
 ### Rate Limiting and Batching
 

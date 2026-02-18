@@ -229,3 +229,98 @@ func BenchmarkBroadcast(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkDebounce(b *testing.B) {
+	for _, n := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("items=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				ctx := context.Background()
+				in := make(chan int, n)
+				for i := range n {
+					in <- i
+				}
+				close(in)
+				out := Debounce(ctx, in, time.Microsecond)
+				for range out {
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkWindow(b *testing.B) {
+	for _, n := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("Tumbling/items=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				ctx := context.Background()
+				in := make(chan int, n)
+				for i := range n {
+					in <- i
+				}
+				close(in)
+				out := Window(ctx, in, time.Microsecond, Tumbling)
+				for range out {
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkTake(b *testing.B) {
+	for _, n := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("items=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				ctx := context.Background()
+				in := make(chan int, n)
+				for i := range n {
+					in <- i
+				}
+				close(in)
+				out := Take(ctx, in, n/2)
+				for range out {
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkSkip(b *testing.B) {
+	for _, n := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("items=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				ctx := context.Background()
+				in := make(chan int, n)
+				for i := range n {
+					in <- i
+				}
+				close(in)
+				out := Skip(ctx, in, n/2)
+				for range out {
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkScanChanx(b *testing.B) {
+	for _, n := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("items=%d", n), func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				ctx := context.Background()
+				in := make(chan int, n)
+				for i := range n {
+					in <- i
+				}
+				close(in)
+				out := Scan(ctx, in, 0, func(acc, v int) int { return acc + v })
+				for range out {
+				}
+			}
+		})
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ErrPoolClosed is returned by [Pool.Submit] when the pool has been closed.
@@ -21,13 +22,32 @@ type Pool struct {
 
 	errMu sync.Mutex
 	errs  []error
+
+	// Observability counters.
+	submitted atomic.Int64
+	completed atomic.Int64
+	errored   atomic.Int64
+	inFlight  atomic.Int64
+	workers   int
+}
+
+// PoolStats provides a point-in-time snapshot of pool activity.
+type PoolStats struct {
+	Submitted  int64 // total tasks submitted
+	Completed  int64 // tasks finished (success + error)
+	Errored    int64 // tasks that returned non-nil error
+	InFlight   int64 // tasks currently executing
+	QueueDepth int   // tasks waiting in the queue
+	Workers    int   // worker count (fixed at creation)
 }
 
 // PoolOption configures a [Pool].
 type PoolOption func(*poolConfig)
 
 type poolConfig struct {
-	queueSize int
+	queueSize       int
+	onMetrics       func(PoolStats)
+	metricsInterval time.Duration
 }
 
 // WithQueueSize sets the task queue buffer size. Default is n * 2.
@@ -37,6 +57,23 @@ func WithQueueSize(size int) PoolOption {
 			panic("scoped: WithQueueSize requires non-negative size")
 		}
 		c.queueSize = size
+	}
+}
+
+// WithPoolMetrics registers a periodic pool metrics callback that fires
+// every interval. The callback receives a snapshot of current pool counters.
+//
+// Panics if interval <= 0 or fn is nil.
+func WithPoolMetrics(interval time.Duration, fn func(PoolStats)) PoolOption {
+	if interval <= 0 {
+		panic("scoped: WithPoolMetrics requires interval > 0")
+	}
+	if fn == nil {
+		panic("scoped: WithPoolMetrics requires non-nil callback")
+	}
+	return func(c *poolConfig) {
+		c.onMetrics = fn
+		c.metricsInterval = interval
 	}
 }
 
@@ -59,14 +96,34 @@ func NewPool(
 
 	ctx, cancel := context.WithCancel(ctx)
 	p := &Pool{
-		tasks:  make(chan func() error, cfg.queueSize),
-		ctx:    ctx,
-		cancel: cancel,
+		tasks:   make(chan func() error, cfg.queueSize),
+		ctx:     ctx,
+		cancel:  cancel,
+		workers: n,
 	}
 
 	p.wg.Add(n)
 	for range n {
 		go p.worker()
+	}
+
+	// Start metrics ticker if configured.
+	if cfg.onMetrics != nil {
+		go func() {
+			ticker := time.NewTicker(cfg.metricsInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if p.closed.Load() {
+						return
+					}
+					cfg.onMetrics(p.Stats())
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
 	}
 
 	return p
@@ -80,6 +137,12 @@ func (p *Pool) worker() {
 }
 
 func (p *Pool) runTask(fn func() error) {
+	p.inFlight.Add(1)
+	defer func() {
+		p.inFlight.Add(-1)
+		p.completed.Add(1)
+	}()
+
 	var err error
 	func() {
 		defer func() {
@@ -90,9 +153,23 @@ func (p *Pool) runTask(fn func() error) {
 		err = fn()
 	}()
 	if err != nil {
+		p.errored.Add(1)
 		p.errMu.Lock()
 		p.errs = append(p.errs, err)
 		p.errMu.Unlock()
+	}
+}
+
+// Stats returns a point-in-time snapshot of pool activity.
+// Safe to call concurrently.
+func (p *Pool) Stats() PoolStats {
+	return PoolStats{
+		Submitted:  p.submitted.Load(),
+		Completed:  p.completed.Load(),
+		Errored:    p.errored.Load(),
+		InFlight:   p.inFlight.Load(),
+		QueueDepth: len(p.tasks),
+		Workers:    p.workers,
 	}
 }
 
@@ -116,6 +193,7 @@ func (p *Pool) Submit(fn func() error) (err error) {
 
 	select {
 	case p.tasks <- fn:
+		p.submitted.Add(1)
 		return nil
 	case <-p.ctx.Done():
 		return p.ctx.Err()
@@ -138,6 +216,7 @@ func (p *Pool) TrySubmit(fn func() error) (submitted bool) {
 
 	select {
 	case p.tasks <- fn:
+		p.submitted.Add(1)
 		return true
 	default:
 		return false

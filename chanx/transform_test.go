@@ -256,3 +256,189 @@ func TestMap_Streaming(t *testing.T) {
 	require.Len(t, got, 5)
 	assert.Equal(t, []int{10, 11, 12, 13, 14}, got)
 }
+
+// --- Take tests ---
+
+func TestTake_Basic(t *testing.T) {
+	ctx := context.Background()
+	in := make(chan int, 5)
+	for i := 1; i <= 5; i++ {
+		in <- i
+	}
+	close(in)
+
+	var got []int
+	for v := range Take(ctx, in, 3) {
+		got = append(got, v)
+	}
+	assert.Equal(t, []int{1, 2, 3}, got)
+}
+
+func TestTake_Zero(t *testing.T) {
+	ctx := context.Background()
+	in := make(chan int, 3)
+	in <- 1
+	close(in)
+
+	var got []int
+	for v := range Take(ctx, in, 0) {
+		got = append(got, v)
+	}
+	assert.Empty(t, got)
+}
+
+func TestTake_MoreThanAvailable(t *testing.T) {
+	ctx := context.Background()
+	in := make(chan int, 2)
+	in <- 1
+	in <- 2
+	close(in)
+
+	var got []int
+	for v := range Take(ctx, in, 10) {
+		got = append(got, v)
+	}
+	assert.Equal(t, []int{1, 2}, got)
+}
+
+func TestTake_NilInput(t *testing.T) {
+	ctx := context.Background()
+	out := Take[int](ctx, nil, 5)
+	_, ok := <-out
+	assert.False(t, ok)
+}
+
+func TestTake_ContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	in := make(chan int)
+	out := Take(ctx, in, 10)
+	cancel()
+	_, ok := <-out
+	assert.False(t, ok)
+}
+
+func TestTake_NegativePanic(t *testing.T) {
+	assert.Panics(t, func() {
+		Take[int](context.Background(), nil, -1)
+	})
+}
+
+// --- Skip tests ---
+
+func TestSkip_Basic(t *testing.T) {
+	ctx := context.Background()
+	in := make(chan int, 5)
+	for i := 1; i <= 5; i++ {
+		in <- i
+	}
+	close(in)
+
+	var got []int
+	for v := range Skip(ctx, in, 2) {
+		got = append(got, v)
+	}
+	assert.Equal(t, []int{3, 4, 5}, got)
+}
+
+func TestSkip_Zero(t *testing.T) {
+	ctx := context.Background()
+	in := make(chan int, 3)
+	for i := 1; i <= 3; i++ {
+		in <- i
+	}
+	close(in)
+
+	var got []int
+	for v := range Skip(ctx, in, 0) {
+		got = append(got, v)
+	}
+	assert.Equal(t, []int{1, 2, 3}, got)
+}
+
+func TestSkip_MoreThanAvailable(t *testing.T) {
+	ctx := context.Background()
+	in := make(chan int, 2)
+	in <- 1
+	in <- 2
+	close(in)
+
+	var got []int
+	for v := range Skip(ctx, in, 10) {
+		got = append(got, v)
+	}
+	assert.Empty(t, got)
+}
+
+func TestSkip_NilInput(t *testing.T) {
+	ctx := context.Background()
+	out := Skip[int](ctx, nil, 5)
+	_, ok := <-out
+	assert.False(t, ok)
+}
+
+func TestSkip_ContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	in := make(chan int)
+	out := Skip(ctx, in, 0)
+	cancel()
+	_, ok := <-out
+	assert.False(t, ok)
+}
+
+func TestSkip_NegativePanic(t *testing.T) {
+	assert.Panics(t, func() {
+		Skip[int](context.Background(), nil, -1)
+	})
+}
+
+// --- Scan tests ---
+
+func TestScan_RunningSum(t *testing.T) {
+	ctx := context.Background()
+	in := make(chan int, 4)
+	in <- 1
+	in <- 2
+	in <- 3
+	in <- 4
+	close(in)
+
+	var got []int
+	for v := range Scan(ctx, in, 0, func(acc, v int) int { return acc + v }) {
+		got = append(got, v)
+	}
+	assert.Equal(t, []int{1, 3, 6, 10}, got)
+}
+
+func TestScan_Empty(t *testing.T) {
+	ctx := context.Background()
+	in := make(chan int)
+	close(in)
+
+	var got []int
+	for v := range Scan(ctx, in, 0, func(acc, v int) int { return acc + v }) {
+		got = append(got, v)
+	}
+	assert.Empty(t, got)
+}
+
+func TestScan_NilInput(t *testing.T) {
+	ctx := context.Background()
+	out := Scan[int, int](ctx, nil, 0, func(acc, v int) int { return acc + v })
+	_, ok := <-out
+	assert.False(t, ok)
+}
+
+func TestScan_NilFnPanic(t *testing.T) {
+	assert.Panics(t, func() {
+		Scan[int, int](context.Background(), make(chan int), 0, nil)
+	})
+}
+
+func TestScan_ContextCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	in := make(chan int)
+	out := Scan(ctx, in, 0, func(acc, v int) int { return acc + v })
+	cancel()
+	_, ok := <-out
+	assert.False(t, ok)
+}

@@ -28,6 +28,11 @@
 //
 //   - [Map]: transforms values through a function in a pipeline.
 //   - [Filter]: passes only values matching a predicate.
+//   - [Take]: forwards the first n items then closes.
+//   - [Skip]: drops the first n items then forwards the rest.
+//   - [Scan]: emits running accumulations of input values.
+//   - [Partition]: splits a channel into two by predicate (match and rest).
+//     Both outputs must be read concurrently to avoid deadlock.
 //
 // # Rate Limiting and Batching
 //

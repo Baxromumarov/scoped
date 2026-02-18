@@ -28,6 +28,12 @@ func SpawnResult[T any](
 	name string,
 	fn func(ctx context.Context) (T, error),
 ) *Result[T] {
+	if sp == nil {
+		panic("scoped: SpawnResult requires non-nil spawner")
+	}
+	if fn == nil {
+		panic("scoped: SpawnResult requires non-nil fn")
+	}
 	r := &Result[T]{ch: make(chan ResultValue[T], 1)}
 
 	sp.Spawn(

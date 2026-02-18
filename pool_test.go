@@ -200,3 +200,110 @@ func TestPoolPanicOnInvalidN(t *testing.T) {
 		NewPool(context.Background(), -1)
 	})
 }
+
+func TestPoolStats_BasicCounting(t *testing.T) {
+	ctx := context.Background()
+	p := NewPool(ctx, 4)
+
+	sentinel := errors.New("fail")
+	for i := range 10 {
+		err := p.Submit(func() error {
+			if i == 5 {
+				return sentinel
+			}
+			return nil
+		})
+		require.NoError(t, err)
+	}
+
+	err := p.Close()
+	require.Error(t, err)
+
+	s := p.Stats()
+	assert.Equal(t, int64(10), s.Submitted)
+	assert.Equal(t, int64(10), s.Completed)
+	assert.True(t, s.Errored >= 1, "at least one error expected")
+	assert.Equal(t, int64(0), s.InFlight)
+	assert.Equal(t, 4, s.Workers)
+}
+
+func TestPoolStats_InFlight(t *testing.T) {
+	ctx := context.Background()
+	p := NewPool(ctx, 2, WithQueueSize(0))
+
+	blocker := make(chan struct{})
+	for range 2 {
+		_ = p.Submit(func() error {
+			<-blocker
+			return nil
+		})
+	}
+
+	// Give workers time to pick up tasks.
+	time.Sleep(20 * time.Millisecond)
+
+	s := p.Stats()
+	assert.Equal(t, int64(2), s.InFlight)
+	assert.Equal(t, int64(0), s.Completed)
+
+	close(blocker)
+	_ = p.Close()
+
+	s = p.Stats()
+	assert.Equal(t, int64(0), s.InFlight)
+	assert.Equal(t, int64(2), s.Completed)
+}
+
+func TestPoolStats_QueueDepth(t *testing.T) {
+	ctx := context.Background()
+	p := NewPool(ctx, 1, WithQueueSize(5))
+
+	blocker := make(chan struct{})
+	// Block the single worker.
+	_ = p.Submit(func() error {
+		<-blocker
+		return nil
+	})
+	time.Sleep(10 * time.Millisecond)
+
+	// Fill the queue.
+	for range 3 {
+		_ = p.Submit(func() error { return nil })
+	}
+
+	s := p.Stats()
+	assert.Equal(t, 3, s.QueueDepth)
+
+	close(blocker)
+	_ = p.Close()
+}
+
+func TestWithPoolMetrics_PeriodicCallback(t *testing.T) {
+	var called atomic.Int32
+	p := NewPool(context.Background(), 2,
+		WithPoolMetrics(20*time.Millisecond, func(s PoolStats) {
+			called.Add(1)
+		}),
+	)
+
+	for range 5 {
+		_ = p.Submit(func() error {
+			time.Sleep(15 * time.Millisecond)
+			return nil
+		})
+	}
+
+	time.Sleep(80 * time.Millisecond)
+	_ = p.Close()
+
+	assert.True(t, called.Load() >= 1, "metrics callback should have fired at least once")
+}
+
+func TestWithPoolMetrics_Panics(t *testing.T) {
+	mustPanic(t, "WithPoolMetrics requires interval > 0", func() {
+		WithPoolMetrics(0, func(PoolStats) {})
+	})
+	mustPanic(t, "WithPoolMetrics requires non-nil callback", func() {
+		WithPoolMetrics(time.Second, nil)
+	})
+}

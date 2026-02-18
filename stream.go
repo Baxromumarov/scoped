@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 var (
@@ -26,6 +27,12 @@ type Stream[T any] struct {
 	stopOnce sync.Once
 	mu       sync.Mutex
 	active   atomic.Int32 // concurrent Next() detector
+
+	// Observability counters (always-on, ~1ns overhead per Next call).
+	itemsRead atomic.Int64
+	errCount  atomic.Int64
+	startNano atomic.Int64 // unix nano, set on first Next() call
+	lastRead  atomic.Int64 // unix nano of last successful read
 }
 
 // Next returns the next item in the stream.
@@ -39,9 +46,17 @@ func (s *Stream[T]) Next(ctx context.Context) (T, error) {
 	}
 	defer s.active.Add(-1)
 
+	// Record start time on first call.
+	s.startNano.CompareAndSwap(0, time.Now().UnixNano())
+
 	val, err := s.next(ctx)
 	if err != nil && err != io.EOF {
+		s.errCount.Add(1)
 		s.setError(err)
+	}
+	if err == nil {
+		s.itemsRead.Add(1)
+		s.lastRead.Store(time.Now().UnixNano())
 	}
 
 	return val, err
@@ -79,6 +94,86 @@ func (s *Stream[T]) stopNow() {
 // Safe to call multiple times and concurrently.
 func (s *Stream[T]) Stop() {
 	s.stopNow()
+}
+
+// StreamStats provides observability counters for a stream.
+type StreamStats struct {
+	ItemsRead  int64         // items successfully read
+	Errors     int64         // non-EOF errors encountered
+	StartTime  time.Time     // zero if Next() was never called
+	LastReadAt time.Time     // zero if no items have been read
+	Throughput float64       // items per second since StartTime (0 if no items)
+}
+
+// Stats returns the current observability counters for the stream.
+// Safe to call concurrently with Next() from a monitoring goroutine.
+func (s *Stream[T]) Stats() StreamStats {
+	read := s.itemsRead.Load()
+	stats := StreamStats{
+		ItemsRead: read,
+		Errors:    s.errCount.Load(),
+	}
+	if ns := s.startNano.Load(); ns > 0 {
+		stats.StartTime = time.Unix(0, ns)
+	}
+	if ns := s.lastRead.Load(); ns > 0 {
+		stats.LastReadAt = time.Unix(0, ns)
+	}
+	if read > 0 && !stats.StartTime.IsZero() {
+		elapsed := time.Since(stats.StartTime).Seconds()
+		if elapsed > 0 {
+			stats.Throughput = float64(read) / elapsed
+		}
+	}
+	return stats
+}
+
+// StreamEvent describes an event within a stream's lifecycle.
+// It is passed to the callback registered via [Observe].
+type StreamEvent[T any] struct {
+	Item     T
+	Err      error         // non-nil for errors (not EOF)
+	Duration time.Duration // time spent in the underlying Next call
+	EOF      bool          // true when stream is exhausted
+	Seq      int64         // 0-based sequence number
+}
+
+// Observe wraps a stream with an event callback that fires after every
+// Next() call. The callback runs synchronously in the consumer's goroutine.
+//
+// Panics if s or fn is nil.
+func Observe[T any](s *Stream[T], fn func(StreamEvent[T])) *Stream[T] {
+	if s == nil {
+		panic("scoped: Observe requires non-nil stream")
+	}
+	if fn == nil {
+		panic("scoped: Observe requires non-nil callback")
+	}
+	var seq int64
+	return &Stream[T]{
+		next: func(ctx context.Context) (T, error) {
+			start := time.Now()
+			val, err := s.Next(ctx)
+			elapsed := time.Since(start)
+
+			evt := StreamEvent[T]{
+				Item:     val,
+				Duration: elapsed,
+				Seq:      seq,
+			}
+			seq++
+
+			if err == io.EOF {
+				evt.EOF = true
+			} else if err != nil {
+				evt.Err = err
+			}
+
+			fn(evt)
+			return val, err
+		},
+		stop: s.stopNow,
+	}
 }
 
 // Filter returns a stream that only emits items for which fn returns true.
@@ -227,6 +322,65 @@ func FromChan[T any](ch <-chan T) *Stream[T] {
 // Deprecated: Use [NewStream] instead, which is identical.
 func FromFunc[T any](fn func(context.Context) (T, error)) *Stream[T] {
 	return NewStream(fn)
+}
+
+// Empty returns a stream that immediately signals [io.EOF].
+// It never yields any items.
+func Empty[T any]() *Stream[T] {
+	return NewStream(func(_ context.Context) (T, error) {
+		var zero T
+		return zero, io.EOF
+	})
+}
+
+// Repeat returns a stream that emits val exactly n times.
+// If n is negative, the stream repeats indefinitely until the context
+// is cancelled or the consumer stops reading.
+func Repeat[T any](val T, n int) *Stream[T] {
+	count := 0
+	return NewStream(func(ctx context.Context) (T, error) {
+		select {
+		case <-ctx.Done():
+			var zero T
+			return zero, ctx.Err()
+		default:
+		}
+		if n >= 0 && count >= n {
+			var zero T
+			return zero, io.EOF
+		}
+		count++
+		return val, nil
+	})
+}
+
+// Generate returns an infinite stream starting from seed, applying fn to
+// produce each subsequent value: seed, fn(seed), fn(fn(seed)), ...
+//
+// The stream is infinite; use [Stream.Take], [Stream.TakeWhile], or
+// context cancellation to bound it.
+//
+// Panics if fn is nil.
+func Generate[T any](seed T, fn func(T) T) *Stream[T] {
+	if fn == nil {
+		panic("scoped: Generate requires non-nil fn")
+	}
+	cur := seed
+	first := true
+	return NewStream(func(ctx context.Context) (T, error) {
+		select {
+		case <-ctx.Done():
+			var zero T
+			return zero, ctx.Err()
+		default:
+		}
+		if first {
+			first = false
+			return cur, nil
+		}
+		cur = fn(cur)
+		return cur, nil
+	})
 }
 
 // Map transforms a stream using a function.
@@ -677,6 +831,143 @@ func (s *Stream[T]) Count(ctx context.Context) (int, error) {
 		}
 
 		count++
+	}
+}
+
+// TakeWhile returns a stream that emits items as long as fn returns true.
+// Once fn returns false, the upstream is stopped and the stream signals EOF.
+//
+// Panics if fn is nil.
+func (s *Stream[T]) TakeWhile(fn func(T) bool) *Stream[T] {
+	if fn == nil {
+		panic("scoped: TakeWhile requires non-nil predicate")
+	}
+	return &Stream[T]{
+		next: func(ctx context.Context) (T, error) {
+			val, err := s.Next(ctx)
+			if err != nil {
+				return val, err
+			}
+			if fn(val) {
+				return val, nil
+			}
+			s.stopNow()
+			var zero T
+			return zero, io.EOF
+		},
+		stop: s.stopNow,
+	}
+}
+
+// DropWhile returns a stream that skips items while fn returns true, then
+// emits all remaining items unconditionally.
+//
+// Panics if fn is nil.
+func (s *Stream[T]) DropWhile(fn func(T) bool) *Stream[T] {
+	if fn == nil {
+		panic("scoped: DropWhile requires non-nil predicate")
+	}
+	dropping := true
+	return &Stream[T]{
+		next: func(ctx context.Context) (T, error) {
+			for {
+				val, err := s.Next(ctx)
+				if err != nil {
+					return val, err
+				}
+				if dropping && fn(val) {
+					continue
+				}
+				dropping = false
+				return val, nil
+			}
+		},
+		stop: s.stopNow,
+	}
+}
+
+// Any returns true if any item in the stream satisfies fn.
+// It stops reading as soon as a match is found.
+// Returns (false, nil) for an empty stream.
+//
+// Panics if fn is nil.
+func (s *Stream[T]) Any(ctx context.Context, fn func(T) bool) (bool, error) {
+	if fn == nil {
+		panic("scoped: Any requires non-nil predicate")
+	}
+	defer s.stopNow()
+	for {
+		val, err := s.Next(ctx)
+		if err == io.EOF {
+			return false, s.Err()
+		}
+		if err != nil {
+			return false, err
+		}
+		if fn(val) {
+			return true, nil
+		}
+	}
+}
+
+// All returns true if every item in the stream satisfies fn.
+// It stops reading as soon as a non-matching item is found.
+// Returns (true, nil) for an empty stream (vacuous truth).
+//
+// Panics if fn is nil.
+func (s *Stream[T]) All(ctx context.Context, fn func(T) bool) (bool, error) {
+	if fn == nil {
+		panic("scoped: All requires non-nil predicate")
+	}
+	defer s.stopNow()
+	for {
+		val, err := s.Next(ctx)
+		if err == io.EOF {
+			return true, s.Err()
+		}
+		if err != nil {
+			return false, err
+		}
+		if !fn(val) {
+			return false, nil
+		}
+	}
+}
+
+// First returns the first item in the stream and stops the stream.
+// If the stream is empty, it returns the zero value and nil error.
+func (s *Stream[T]) First(ctx context.Context) (T, error) {
+	defer s.stopNow()
+	val, err := s.Next(ctx)
+	if err == io.EOF {
+		var zero T
+		return zero, s.Err()
+	}
+	return val, err
+}
+
+// Last consumes the entire stream and returns the last item.
+// If the stream is empty, it returns the zero value and nil error.
+func (s *Stream[T]) Last(ctx context.Context) (T, error) {
+	defer s.stopNow()
+	var last T
+	found := false
+	for {
+		val, err := s.Next(ctx)
+		if err == io.EOF {
+			if !found {
+				return last, s.Err()
+			}
+			return last, s.Err()
+		}
+		if err != nil {
+			if found {
+				return last, err
+			}
+			return last, err
+		}
+		last = val
+		found = true
 	}
 }
 

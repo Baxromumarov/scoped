@@ -66,12 +66,27 @@ type TaskEvent struct {
 
 // Metrics provides aggregated counters for a scope's lifecycle.
 type Metrics struct {
-	TotalSpawned int64
-	ActiveTasks  int64
-	Completed    int64
-	Errored      int64
-	Panicked     int64
-	Cancelled    int64
+	TotalSpawned  int64
+	ActiveTasks   int64
+	Completed     int64
+	Errored       int64
+	Panicked      int64
+	Cancelled     int64
+	LongestActive time.Duration // zero if task tracking is not enabled
+}
+
+// RunningTask describes a task currently executing within a scope.
+type RunningTask struct {
+	Name    string
+	Started time.Time
+	Elapsed time.Duration // populated at snapshot time
+}
+
+// ScopeSnapshot is a point-in-time view of a scope's state.
+type ScopeSnapshot struct {
+	Metrics       Metrics
+	RunningTasks  []RunningTask
+	LongestActive time.Duration
 }
 
 type config struct {
@@ -84,6 +99,9 @@ type config struct {
 	onEvent         func(TaskEvent)
 	onMetrics       func(Metrics)
 	metricsInterval time.Duration
+	trackTasks      bool
+	stallThreshold  time.Duration
+	onStall         func(RunningTask)
 }
 
 // Option configures a [Scope].
@@ -191,5 +209,36 @@ func WithOnMetrics(interval time.Duration, fn func(Metrics)) Option {
 	return func(c *config) {
 		c.onMetrics = fn
 		c.metricsInterval = interval
+	}
+}
+
+// WithTaskTracking enables per-task tracking so that [Scope.Snapshot]
+// includes [RunningTask] entries and [ScopeSnapshot.LongestActive] duration.
+// This has a small overhead (mutex acquisition per task start/end).
+func WithTaskTracking() Option {
+	return func(c *config) {
+		c.trackTasks = true
+	}
+}
+
+// WithStallDetector registers a periodic check for tasks running longer than
+// threshold. The callback receives each stalled task with its elapsed duration.
+// The check runs every threshold/2 interval (minimum 10ms).
+//
+// This is purely observational — unlike [SpawnTimeout], it does not cancel
+// stalled tasks. Implicitly enables task tracking (see [WithTaskTracking]).
+//
+// Panics if threshold <= 0 or fn is nil.
+func WithStallDetector(threshold time.Duration, fn func(RunningTask)) Option {
+	if threshold <= 0 {
+		panic("scoped: WithStallDetector requires threshold > 0")
+	}
+	if fn == nil {
+		panic("scoped: WithStallDetector requires non-nil callback")
+	}
+	return func(c *config) {
+		c.stallThreshold = threshold
+		c.onStall = fn
+		c.trackTasks = true
 	}
 }

@@ -115,6 +115,94 @@ func BenchmarkFromSlice(b *testing.B) {
 	}
 }
 
+func BenchmarkStreamBatch(b *testing.B) {
+	for _, size := range []int{100, 10000} {
+		items := make([]int, size)
+		for i := range items {
+			items[i] = i
+		}
+		for _, batchSize := range []int{10, 100} {
+			b.Run(fmt.Sprintf("Size=%d/Batch=%d", size, batchSize), func(b *testing.B) {
+				b.ReportAllocs()
+				for i := 0; i < b.N; i++ {
+					s := Batch(FromSliceUnsafe(items), batchSize)
+					_, _ = s.ToSlice(context.Background())
+				}
+			})
+		}
+	}
+}
+
+func BenchmarkStreamDistinct(b *testing.B) {
+	for _, card := range []int{10, 1000} {
+		size := 10000
+		items := make([]int, size)
+		for i := range items {
+			items[i] = i % card
+		}
+		b.Run(fmt.Sprintf("Cardinality=%d", card), func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				s := Distinct(FromSliceUnsafe(items))
+				_, _ = s.ToSlice(context.Background())
+			}
+		})
+	}
+}
+
+func BenchmarkStreamReduce(b *testing.B) {
+	for _, size := range []int{100, 10000, 100000} {
+		items := make([]int, size)
+		for i := range items {
+			items[i] = i
+		}
+		b.Run(fmt.Sprintf("Size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			ctx := context.Background()
+			for i := 0; i < b.N; i++ {
+				_, _ = Reduce(ctx, FromSliceUnsafe(items), 0, func(acc, v int) int { return acc + v })
+			}
+		})
+	}
+}
+
+func BenchmarkStreamFlatMap(b *testing.B) {
+	sub := []int{1, 2, 3, 4, 5}
+	for _, size := range []int{100, 1000} {
+		items := make([]int, size)
+		for i := range items {
+			items[i] = i
+		}
+		b.Run(fmt.Sprintf("Size=%d/SubSize=5", size), func(b *testing.B) {
+			b.ReportAllocs()
+			ctx := context.Background()
+			for i := 0; i < b.N; i++ {
+				fm := FlatMap(FromSliceUnsafe(items), func(_ context.Context, _ int) *Stream[int] {
+					return FromSliceUnsafe(sub)
+				})
+				_, _ = fm.ToSlice(ctx)
+			}
+		})
+	}
+}
+
+func BenchmarkStreamScan(b *testing.B) {
+	for _, size := range []int{100, 10000} {
+		items := make([]int, size)
+		for i := range items {
+			items[i] = i
+		}
+		b.Run(fmt.Sprintf("Size=%d", size), func(b *testing.B) {
+			b.ReportAllocs()
+			ctx := context.Background()
+			for i := 0; i < b.N; i++ {
+				s := Scan(FromSliceUnsafe(items), 0, func(acc, v int) int { return acc + v })
+				_, _ = s.ToSlice(ctx)
+			}
+		})
+	}
+}
+
 func BenchmarkHeavyParallel(b *testing.B) {
 	size := 10000
 	items := make([]int, size)

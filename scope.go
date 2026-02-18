@@ -1,4 +1,4 @@
-// Scope provides a mechanism for structured concurrency in Spawn, managing a group of goroutines
+// Package scoped provides a mechanism for structured concurrency in Spawn, managing a group of goroutines
 // with coordinated lifecycle and error handling. It allows spawning child tasks that share a
 // common context and aggregate errors according to a configured policy (FailFast or Collect).
 //
@@ -36,6 +36,12 @@ import (
 // to spawn sub-tasks.
 type TaskFunc func(ctx context.Context, sp Spawner) error
 
+// runningTaskEntry is an internal entry for task-level tracking.
+type runningTaskEntry struct {
+	name    string
+	started time.Time
+}
+
 // scope internal
 // it maintains the state of a structured concurrency scope.
 type scope struct {
@@ -71,6 +77,51 @@ type scope struct {
 
 	// Metrics ticker cleanup.
 	stopMetrics func()
+
+	// Task-level tracking (populated when trackTasks is true).
+	trackTasks   bool
+	tasksMu      sync.Mutex
+	runningTasks map[uint64]runningTaskEntry
+	nextTaskID   uint64
+
+	// Stall detector cleanup.
+	stopStall func()
+}
+
+// registerTask records a task as running and returns its unique ID.
+func (s *scope) registerTask(name string) uint64 {
+	s.tasksMu.Lock()
+	id := s.nextTaskID
+	s.nextTaskID++
+	s.runningTasks[id] = runningTaskEntry{name: name, started: time.Now()}
+	s.tasksMu.Unlock()
+	return id
+}
+
+// unregisterTask removes a task from the running set.
+func (s *scope) unregisterTask(id uint64) {
+	s.tasksMu.Lock()
+	delete(s.runningTasks, id)
+	s.tasksMu.Unlock()
+}
+
+// longestActive returns the duration of the longest-running active task.
+// Caller must NOT hold tasksMu.
+func (s *scope) longestActive() time.Duration {
+	if !s.trackTasks {
+		return 0
+	}
+	now := time.Now()
+	var longest time.Duration
+	s.tasksMu.Lock()
+	for _, entry := range s.runningTasks {
+		elapsed := now.Sub(entry.started)
+		if elapsed > longest {
+			longest = elapsed
+		}
+	}
+	s.tasksMu.Unlock()
+	return longest
 }
 
 // Run creates a [Scope], invokes fn with its root [Spawner], then waits for
@@ -116,6 +167,11 @@ func (s *scope) finalize() (error, *PanicError) {
 		// Stop metrics ticker if running.
 		if s.stopMetrics != nil {
 			s.stopMetrics()
+		}
+
+		// Stop stall detector if running.
+		if s.stopStall != nil {
+			s.stopStall()
 		}
 
 		// Check if context was cancelled externally (before cleanup).
@@ -225,7 +281,7 @@ func (s *scope) recordError(taskInfo TaskInfo, err error) {
 		Task: taskInfo,
 		Err:  err,
 	}
-	
+
 	switch s.cfg.policy {
 	case FailFast:
 		s.errOnce.Do(
@@ -279,6 +335,12 @@ func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 		s.sem = make(chan struct{}, cfg.limit)
 	}
 
+	// Initialize task tracking if enabled.
+	if cfg.trackTasks {
+		s.trackTasks = true
+		s.runningTasks = make(map[uint64]runningTaskEntry)
+	}
+
 	// Start metrics ticker if configured.
 	if cfg.onMetrics != nil {
 		stop := make(chan struct{})
@@ -290,13 +352,55 @@ func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 				select {
 				case <-ticker.C:
 					cfg.onMetrics(Metrics{
-						TotalSpawned: s.totalSpawned.Load(),
-						ActiveTasks:  s.activeTasks.Load(),
-						Completed:    s.completed.Load(),
-						Errored:      s.errored.Load(),
-						Panicked:     s.panicked.Load(),
-						Cancelled:    s.cancelled.Load(),
+						TotalSpawned:  s.totalSpawned.Load(),
+						ActiveTasks:   s.activeTasks.Load(),
+						Completed:     s.completed.Load(),
+						Errored:       s.errored.Load(),
+						Panicked:      s.panicked.Load(),
+						Cancelled:     s.cancelled.Load(),
+						LongestActive: s.longestActive(),
 					})
+				case <-stop:
+					return
+				}
+			}
+		}()
+	}
+
+	// Start stall detector if configured.
+	if cfg.onStall != nil {
+		stop := make(chan struct{})
+		s.stopStall = func() { close(stop) }
+
+		checkInterval := cfg.stallThreshold / 2
+		if checkInterval < 10*time.Millisecond {
+			checkInterval = 10 * time.Millisecond
+		}
+
+		go func() {
+			ticker := time.NewTicker(checkInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					now := time.Now()
+					s.tasksMu.Lock()
+					var stalled []RunningTask
+					for _, entry := range s.runningTasks {
+						elapsed := now.Sub(entry.started)
+						if elapsed >= cfg.stallThreshold {
+							stalled = append(stalled, RunningTask{
+								Name:    entry.name,
+								Started: entry.started,
+								Elapsed: elapsed,
+							})
+						}
+					}
+					s.tasksMu.Unlock()
+
+					for _, rt := range stalled {
+						cfg.onStall(rt)
+					}
 				case <-stop:
 					return
 				}
@@ -395,4 +499,42 @@ func (sc *Scope) DroppedErrors() int {
 	defer sc.s.errMu.Unlock()
 
 	return sc.s.droppedErrors
+}
+
+// Snapshot returns a point-in-time view of the scope's state.
+// If task tracking is not enabled (via [WithStallDetector] or [WithTaskTracking]),
+// RunningTasks will be nil and LongestActive will be zero.
+func (sc *Scope) Snapshot() ScopeSnapshot {
+	s := sc.s
+	snap := ScopeSnapshot{
+		Metrics: Metrics{
+			TotalSpawned:  s.totalSpawned.Load(),
+			ActiveTasks:   s.activeTasks.Load(),
+			Completed:     s.completed.Load(),
+			Errored:       s.errored.Load(),
+			Panicked:      s.panicked.Load(),
+			Cancelled:     s.cancelled.Load(),
+			LongestActive: s.longestActive(),
+		},
+	}
+
+	if s.trackTasks {
+		now := time.Now()
+		s.tasksMu.Lock()
+		snap.RunningTasks = make([]RunningTask, 0, len(s.runningTasks))
+		for _, entry := range s.runningTasks {
+			elapsed := now.Sub(entry.started)
+			if elapsed > snap.LongestActive {
+				snap.LongestActive = elapsed
+			}
+			snap.RunningTasks = append(snap.RunningTasks, RunningTask{
+				Name:    entry.name,
+				Started: entry.started,
+				Elapsed: elapsed,
+			})
+		}
+		s.tasksMu.Unlock()
+	}
+
+	return snap
 }

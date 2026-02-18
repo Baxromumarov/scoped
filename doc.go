@@ -51,6 +51,8 @@
 //   - [SpawnRetry]: spawn a task with exponential-backoff retries.
 //   - [SpawnScope]: spawn a sub-scope as a single task, allowing
 //     hierarchical error handling with independent policies.
+//   - [Race]: run multiple tasks concurrently and return the first
+//     successful result, cancelling the rest.
 //
 // # Bounded Concurrency
 //
@@ -85,13 +87,26 @@
 //     change (started, done, errored, panicked, cancelled).
 //   - [WithOnMetrics]: periodic [Metrics] snapshots with counters for
 //     spawned, active, completed, errored, panicked, and cancelled tasks.
+//   - [WithTaskTracking]: enables per-task tracking so [Scope.Snapshot]
+//     includes [RunningTask] entries and [ScopeSnapshot.LongestActive].
+//   - [WithStallDetector]: periodic check for tasks exceeding a duration
+//     threshold, calling a callback for each stalled task. Purely
+//     observational — does not cancel stalled tasks.
+//
+// [Pool] exposes [Pool.Stats] returning a [PoolStats] snapshot, and
+// [WithPoolMetrics] for periodic pool metrics callbacks.
+//
+// [Stream] tracks items read, errors, and timing automatically.
+// [Stream.Stats] returns a [StreamStats] snapshot including throughput.
+// [Observe] wraps a stream with a per-item [StreamEvent] callback.
 //
 // # Streams
 //
 // [Stream] provides a pull-based, composable data pipeline. Create streams
-// with [NewStream], [FromSlice], [FromSliceUnsafe], [FromChan], or
-// [FromFunc]. Chains of [Stream.Filter], [Stream.Take], [Stream.Skip],
-// [Stream.Peek], [Map], [Batch], [FlatMap], and [Distinct] are evaluated
+// with [NewStream], [FromSlice], [FromSliceUnsafe], [FromChan], [Empty],
+// [Repeat], or [Generate]. Chains of [Stream.Filter], [Stream.Take],
+// [Stream.Skip], [Stream.Peek], [Stream.TakeWhile], [Stream.DropWhile],
+// [Map], [Batch], [FlatMap], [Distinct], [Scan], and [Zip] are evaluated
 // lazily. [Reduce] folds a stream into a single value.
 //
 // [ParallelMap] processes items concurrently with optional ordering and

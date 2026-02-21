@@ -1,26 +1,3 @@
-// Package scoped provides a mechanism for structured concurrency in Spawn, managing a group of goroutines
-// with coordinated lifecycle and error handling. It allows spawning child tasks that share a
-// common context and aggregate errors according to a configured policy (FailFast or Collect).
-//
-// A Scope must be created via New() and finalized by calling Wait(). The Spawner interface
-// is used to spawn new tasks within the scope. All tasks receive a context that is cancelled
-// when the scope ends, either due to completion of all tasks or an explicit cancellation.
-//
-// Error handling is configurable:
-//   - FailFast: The scope stops on the first error and cancels remaining tasks.
-//   - Collect: All errors are collected and joined together at the end.
-//
-// Panics in tasks are captured and can be converted to errors (panicAsErr option) or
-// re-panicked after scope finalization.
-//
-// Example usage:
-//
-//	sc, spawner := New(context.Background())
-//	spawner.Spawn("child", func(ctx context.Context, sp Spawner) error {
-//	    *task implementation is here*
-//	    return nil
-//	})
-//	err := sc.Wait()
 package scoped
 
 import (

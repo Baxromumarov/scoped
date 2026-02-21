@@ -108,7 +108,7 @@ func BenchmarkFromSlice(b *testing.B) {
 		b.Run(fmt.Sprintf("Unsafe/Size=%d", size), func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				s := FromSliceUnsafe(items)
+				s := FromSliceRef(items)
 				_, _ = s.ToSlice(context.Background())
 			}
 		})
@@ -125,7 +125,7 @@ func BenchmarkStreamBatch(b *testing.B) {
 			b.Run(fmt.Sprintf("Size=%d/Batch=%d", size, batchSize), func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					s := Batch(FromSliceUnsafe(items), batchSize)
+					s := Batch(FromSliceRef(items), batchSize)
 					_, _ = s.ToSlice(context.Background())
 				}
 			})
@@ -143,7 +143,7 @@ func BenchmarkStreamDistinct(b *testing.B) {
 		b.Run(fmt.Sprintf("Cardinality=%d", card), func(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				s := Distinct(FromSliceUnsafe(items))
+				s := Distinct(FromSliceRef(items))
 				_, _ = s.ToSlice(context.Background())
 			}
 		})
@@ -160,7 +160,7 @@ func BenchmarkStreamReduce(b *testing.B) {
 			b.ReportAllocs()
 			ctx := context.Background()
 			for i := 0; i < b.N; i++ {
-				_, _ = Reduce(ctx, FromSliceUnsafe(items), 0, func(acc, v int) int { return acc + v })
+				_, _ = Reduce(ctx, FromSliceRef(items), 0, func(acc, v int) int { return acc + v })
 			}
 		})
 	}
@@ -177,8 +177,8 @@ func BenchmarkStreamFlatMap(b *testing.B) {
 			b.ReportAllocs()
 			ctx := context.Background()
 			for i := 0; i < b.N; i++ {
-				fm := FlatMap(FromSliceUnsafe(items), func(_ context.Context, _ int) *Stream[int] {
-					return FromSliceUnsafe(sub)
+				fm := FlatMap(FromSliceRef(items), func(_ context.Context, _ int) *Stream[int] {
+					return FromSliceRef(sub)
 				})
 				_, _ = fm.ToSlice(ctx)
 			}
@@ -196,7 +196,7 @@ func BenchmarkStreamScan(b *testing.B) {
 			b.ReportAllocs()
 			ctx := context.Background()
 			for i := 0; i < b.N; i++ {
-				s := Scan(FromSliceUnsafe(items), 0, func(acc, v int) int { return acc + v })
+				s := Scan(FromSliceRef(items), 0, func(acc, v int) int { return acc + v })
 				_, _ = s.ToSlice(ctx)
 			}
 		})

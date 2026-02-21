@@ -270,12 +270,12 @@ func FromSlice[T any](items []T) *Stream[T] {
 	})
 }
 
-// FromSliceUnsafe creates a stream that reads directly from the provided slice
+// FromSliceRef creates a stream that reads directly from the provided slice
 // without copying. The caller must not modify the slice after this call.
 //
 // Use this instead of [FromSlice] in performance-critical paths where the
 // allocation cost of copying matters and ownership can be guaranteed.
-func FromSliceUnsafe[T any](items []T) *Stream[T] {
+func FromSliceRef[T any](items []T) *Stream[T] {
 	var idx int
 	return NewStream(func(ctx context.Context) (T, error) {
 		var zero T
@@ -767,11 +767,11 @@ func (s *Stream[T]) ToChanScope(sp Spawner) (<-chan T, <-chan error) {
 	return ch, errCh
 }
 
-// Collect is an alias for ToSlice.
+// FromSliceUnsafe is a deprecated alias for [FromSliceRef].
 //
-// Deprecated: Use [Stream.ToSlice] instead.
-func (s *Stream[T]) Collect(ctx context.Context) ([]T, error) {
-	return s.ToSlice(ctx)
+// Deprecated: Use [FromSliceRef] instead.
+func FromSliceUnsafe[T any](items []T) *Stream[T] {
+	return FromSliceRef(items)
 }
 
 // Skip skips the first n items in the stream.

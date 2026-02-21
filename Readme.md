@@ -1,5 +1,10 @@
 # scoped
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/baxromumarov/scoped.svg)](https://pkg.go.dev/github.com/baxromumarov/scoped)
+[![CI](https://github.com/baxromumarov/scoped/actions/workflows/ci.yml/badge.svg)](https://github.com/baxromumarov/scoped/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/baxromumarov/scoped)](https://goreportcard.com/report/github.com/baxromumarov/scoped)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Structured concurrency primitives for Go — run goroutines with clear lifecycles, coordinated cancellation, and composable error handling.
 
 ## Install
@@ -465,6 +470,44 @@ go get github.com/baxromumarov/scoped/chanx
 | `OrDone` | Wrap a channel with context cancellation |
 | `Drain` | Discard remaining values to unblock producers |
 | `Closable` | Idempotent-close channel wrapper (panics become `ErrClosed`) |
+
+## Benchmarks
+
+Comparison against raw goroutines, `golang.org/x/sync/errgroup`, and `sourcegraph/conc` (AMD Ryzen 7, Go 1.26):
+
+### Overhead per task spawn
+
+| Implementation | 10 tasks | 100 tasks | 1000 tasks |
+|----------------|----------|-----------|------------|
+| Raw goroutine+WG | 1.7 us | 17.5 us | 167 us |
+| errgroup | 1.8 us | 16.7 us | 181 us |
+| conc | 1.8 us | 17.0 us | 172 us |
+| **scoped** | 3.2 us | 24.7 us | 227 us |
+
+### ForEach (10 items, light work)
+
+| Implementation | ns/op | allocs/op |
+|----------------|-------|-----------|
+| **scoped ForEach** | **7,552** | **29** |
+| conc Iterator | 8,402 | 14 |
+| raw goroutines | 297,209 | 1,002 |
+| errgroup | 337,836 | 2,004 |
+
+### Hot-path operations (zero allocations)
+
+| Operation | ns/op |
+|-----------|-------|
+| Semaphore Acquire/Release | ~30 ns |
+| Pool Submit | ~120 ns |
+| chanx.TrySend | ~9 ns |
+| chanx.TryRecv | ~13 ns |
+| chanx.Send (ctx-aware) | ~23 ns |
+
+Run benchmarks locally:
+
+```bash
+make bench
+```
 
 ## License
 

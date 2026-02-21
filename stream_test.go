@@ -260,9 +260,9 @@ func TestStreamMethods(t *testing.T) {
 		}
 	})
 
-	t.Run("Collect", func(t *testing.T) {
+	t.Run("ToSliceAlias", func(t *testing.T) {
 		items := []int{1, 2}
-		res, err := FromSlice(items).Collect(ctx)
+		res, err := FromSlice(items).ToSlice(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}

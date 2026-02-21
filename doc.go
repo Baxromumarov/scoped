@@ -111,7 +111,7 @@
 // # Streams
 //
 // [Stream] provides a pull-based, composable data pipeline. Create streams
-// with [NewStream], [FromSlice], [FromSliceUnsafe], [FromChan], [Empty],
+// with [NewStream], [FromSlice], [FromSliceRef], [FromChan], [Empty],
 // [Repeat], or [Generate]. Chains of [Stream.Filter], [Stream.Take],
 // [Stream.Skip], [Stream.Peek], [Stream.TakeWhile], [Stream.DropWhile],
 // [Map], [Batch], [FlatMap], [Distinct], [Scan], and [Zip] are evaluated

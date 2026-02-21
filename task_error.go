@@ -59,6 +59,7 @@ func CauseOf(err error) error {
 
 	return err
 }
+
 // AllTaskErrors recursively collects every [*TaskError] from err's chain,
 // including errors wrapped via [errors.Join]. Returns nil if none are found.
 func AllTaskErrors(err error) []*TaskError {

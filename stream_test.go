@@ -175,7 +175,7 @@ func TestParallelMap(t *testing.T) {
 
 func TestStreamError(t *testing.T) {
 	wantErr := errors.New("boom")
-	s := FromFunc(func(ctx context.Context) (int, error) {
+	s := NewStream(func(ctx context.Context) (int, error) {
 		return 0, wantErr
 	})
 	_, err := s.ToSlice(context.Background())

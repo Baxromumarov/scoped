@@ -98,11 +98,11 @@ func (s *Stream[T]) Stop() {
 
 // StreamStats provides observability counters for a stream.
 type StreamStats struct {
-	ItemsRead  int64         // items successfully read
-	Errors     int64         // non-EOF errors encountered
-	StartTime  time.Time     // zero if Next() was never called
-	LastReadAt time.Time     // zero if no items have been read
-	Throughput float64       // items per second since StartTime (0 if no items)
+	ItemsRead  int64     // items successfully read
+	Errors     int64     // non-EOF errors encountered
+	StartTime  time.Time // zero if Next() was never called
+	LastReadAt time.Time // zero if no items have been read
+	Throughput float64   // items per second since StartTime (0 if no items)
 }
 
 // Stats returns the current observability counters for the stream.
@@ -317,12 +317,6 @@ func FromChan[T any](ch <-chan T) *Stream[T] {
 	})
 }
 
-// FromFunc creates a stream from a function.
-//
-// Deprecated: Use [NewStream] instead, which is identical.
-func FromFunc[T any](fn func(context.Context) (T, error)) *Stream[T] {
-	return NewStream(fn)
-}
 
 // Empty returns a stream that immediately signals [io.EOF].
 // It never yields any items.
@@ -484,8 +478,8 @@ func ParallelMap[A, B any](
 	}
 
 	mapCtx, mapCancel := context.WithCancelCause(ctx)
-	
-	resChanSize := opts.BufferSize + opts.MaxWorkers 
+
+	resChanSize := opts.BufferSize + opts.MaxWorkers
 	resCh := make(chan indexedResult[B], resChanSize)
 	out := &Stream[B]{
 		stop: func() {

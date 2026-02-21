@@ -62,7 +62,6 @@ func TestBroadcastSlowConsumer(t *testing.T) {
 
 	// Fast consumers
 	for i := range 2 {
-		i := i
 		wg.Go(func() {
 			for val := range outs[i] {
 				received[i] = append(received[i], val)

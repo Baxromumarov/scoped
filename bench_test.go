@@ -35,7 +35,7 @@ func BenchmarkRunWithLimit(b *testing.B) {
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
 				_ = scoped.Run(context.Background(), func(s scoped.Spawner) {
-					for j := 0; j < n; j++ {
+					for range n {
 						s.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 							return nil
 						})
@@ -54,10 +54,8 @@ func BenchmarkRawGoroutineWaitGroup(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				var wg sync.WaitGroup
 				for range n {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-					}()
+					wg.Go(func() {
+					})
 				}
 				wg.Wait()
 			}
@@ -152,7 +150,7 @@ func BenchmarkCollectPolicy(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			_ = scoped.Run(context.Background(), func(sp scoped.Spawner) {
-				for j := 0; j < n; j++ {
+				for range n {
 					sp.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 						return nil
 					})
@@ -164,7 +162,7 @@ func BenchmarkCollectPolicy(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
 			_ = scoped.Run(context.Background(), func(sp scoped.Spawner) {
-				for j := 0; j < n; j++ {
+				for range n {
 					sp.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 						return nil
 					})

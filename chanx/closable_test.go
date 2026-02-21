@@ -58,11 +58,11 @@ func TestClosable_SendConcurrent(t *testing.T) {
 	var successCount, errorCount int64
 
 	// Start multiple senders
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < 10; j++ {
+			for j := range 10 {
 				err := c.Send(id*10 + j)
 				if err == nil {
 					atomic.AddInt64(&successCount, 1)
@@ -177,7 +177,7 @@ func TestClosable_TrySendConcurrent(t *testing.T) {
 	var successCount, errorCount int64
 
 	// Start multiple senders
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -247,12 +247,10 @@ func TestClosable_CloseConcurrent(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Start multiple closers
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			c.Close()
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -451,7 +449,7 @@ func TestClosable_RaceConditions(t *testing.T) {
 		var wg sync.WaitGroup
 
 		// Start senders
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			wg.Add(1)
 			go func(val int) {
 				defer wg.Done()
@@ -460,12 +458,10 @@ func TestClosable_RaceConditions(t *testing.T) {
 		}
 
 		// Start closer
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			time.Sleep(1 * time.Millisecond)
 			c.Close()
-		}()
+		})
 
 		wg.Wait()
 
@@ -485,7 +481,7 @@ func TestClosable_RaceConditions(t *testing.T) {
 		var wg sync.WaitGroup
 
 		// Start try senders
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			wg.Add(1)
 			go func(val int) {
 				defer wg.Done()
@@ -494,12 +490,10 @@ func TestClosable_RaceConditions(t *testing.T) {
 		}
 
 		// Start closer
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			time.Sleep(1 * time.Millisecond)
 			c.Close()
-		}()
+		})
 
 		wg.Wait()
 
@@ -519,12 +513,10 @@ func TestClosable_RaceConditions(t *testing.T) {
 		var wg sync.WaitGroup
 
 		// Start multiple closers
-		for i := 0; i < 10; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 10 {
+			wg.Go(func() {
 				c.Close()
-			}()
+			})
 		}
 
 		wg.Wait()
@@ -576,7 +568,7 @@ func TestClosable_SendCloseRaceNoLostMessages(t *testing.T) {
 	c := NewClosable[int](100)
 
 	// Send values
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		err := c.Send(i)
 		assert.NoError(t, err)
 	}

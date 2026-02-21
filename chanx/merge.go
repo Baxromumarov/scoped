@@ -20,9 +20,7 @@ func Merge[T any](ctx context.Context, chs ...<-chan T) <-chan T {
 		if ch == nil {
 			continue // Skip nil channels
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case v, ok := <-ch:
@@ -38,7 +36,7 @@ func Merge[T any](ctx context.Context, chs ...<-chan T) <-chan T {
 					return
 				}
 			}
-		}()
+		})
 	}
 
 	go func() {

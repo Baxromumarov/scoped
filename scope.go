@@ -372,10 +372,7 @@ func New(parent context.Context, opts ...Option) (*Scope, Spawner) {
 		stop := make(chan struct{})
 		s.stopStall = func() { close(stop) }
 
-		checkInterval := cfg.stallThreshold / 2
-		if checkInterval < 10*time.Millisecond {
-			checkInterval = 10 * time.Millisecond
-		}
+		checkInterval := max(cfg.stallThreshold/2, 10*time.Millisecond)
 
 		go func() {
 			ticker := time.NewTicker(checkInterval)

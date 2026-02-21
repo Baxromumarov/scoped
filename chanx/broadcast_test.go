@@ -17,14 +17,11 @@ func broadcastCollect[T any](t *testing.T, outs []<-chan T) [][]T {
 	received := make([][]T, len(outs))
 	var wg sync.WaitGroup
 	for i, out := range outs {
-		i, out := i, out
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for val := range out {
 				received[i] = append(received[i], val)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	return received
@@ -43,7 +40,7 @@ func TestBroadcastBasic(t *testing.T) {
 	received := broadcastCollect(t, outs)
 
 	expected := []int{1, 2, 3, 4, 5}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		assert.Equal(t, expected, received[i], "consumer %d", i)
 	}
 }
@@ -64,31 +61,27 @@ func TestBroadcastSlowConsumer(t *testing.T) {
 	received := make([][]int, 3)
 
 	// Fast consumers
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for val := range outs[i] {
 				received[i] = append(received[i], val)
 			}
-		}()
+		})
 	}
 
 	// Slow consumer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for val := range outs[2] {
 			received[2] = append(received[2], val)
 			time.Sleep(50 * time.Millisecond)
 		}
-	}()
+	})
 
 	wg.Wait()
 
 	expected := []int{1, 2, 3, 4, 5}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		assert.Equal(t, expected, received[i], "consumer %d", i)
 	}
 }

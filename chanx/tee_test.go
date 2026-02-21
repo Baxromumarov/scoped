@@ -18,14 +18,11 @@ func teeCollect[T any](t *testing.T, outs []<-chan T) [][]T {
 	received := make([][]T, len(outs))
 	var wg sync.WaitGroup
 	for i, out := range outs {
-		i, out := i, out
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for val := range out {
 				received[i] = append(received[i], val)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	return received
@@ -172,7 +169,7 @@ func TestTee_ConcurrentConsumption(t *testing.T) {
 	received := teeCollect(t, outs)
 
 	expected := []int{1, 2, 3, 4, 5}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		assert.Equal(t, expected, received[i])
 	}
 }
@@ -210,25 +207,21 @@ func TestTee_SlowConsumerBlocksOthers(t *testing.T) {
 	var elapsed time.Duration
 
 	// Slow consumer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for val := range outs[0] {
 			slowReceived = append(slowReceived, val)
 			time.Sleep(50 * time.Millisecond)
 		}
-	}()
+	})
 
 	// Fast consumer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		start := time.Now()
 		for val := range outs[1] {
 			fastReceived = append(fastReceived, val)
 		}
 		elapsed = time.Since(start)
-	}()
+	})
 
 	wg.Wait()
 

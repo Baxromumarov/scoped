@@ -11,7 +11,7 @@ func BenchmarkStream(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(fmt.Sprintf("Simple/Size=%d", size), func(b *testing.B) {
 			items := make([]int, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				items[i] = i
 			}
 			b.ResetTimer()
@@ -29,7 +29,7 @@ func BenchmarkStream(b *testing.B) {
 
 		b.Run(fmt.Sprintf("Fluent/Size=%d", size), func(b *testing.B) {
 			items := make([]int, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				items[i] = i
 			}
 			b.ResetTimer()
@@ -43,7 +43,7 @@ func BenchmarkStream(b *testing.B) {
 
 		b.Run(fmt.Sprintf("ParallelUnordered/Size=%d", size), func(b *testing.B) {
 			items := make([]int, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				items[i] = i
 			}
 			b.ResetTimer()
@@ -66,7 +66,7 @@ func BenchmarkStream(b *testing.B) {
 
 		b.Run(fmt.Sprintf("ParallelOrdered/Size=%d", size), func(b *testing.B) {
 			items := make([]int, size)
-			for i := 0; i < size; i++ {
+			for i := range size {
 				items[i] = i
 			}
 			b.ResetTimer()
@@ -206,7 +206,7 @@ func BenchmarkStreamScan(b *testing.B) {
 func BenchmarkHeavyParallel(b *testing.B) {
 	size := 10000
 	items := make([]int, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		items[i] = i
 	}
 	b.ResetTimer()
@@ -224,7 +224,7 @@ func BenchmarkHeavyParallel(b *testing.B) {
 				func(ctx context.Context, v int) (int, error) {
 					// Heavyish computation
 					acc := 0
-					for j := 0; j < 1000; j++ {
+					for j := range 1000 {
 						acc += j
 					}
 					return v + acc, nil

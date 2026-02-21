@@ -26,7 +26,7 @@ func TestMerge_BasicFunctionality(t *testing.T) {
 
 	// Should receive all values (order not guaranteed)
 	received := make([]int, 0, 4)
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		val, ok := <-out
 		require.True(t, ok)
 		received = append(received, val)
@@ -186,7 +186,7 @@ func TestMerge_ConcurrentProduction(t *testing.T) {
 
 	// Start producers
 	go func() {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			ch1 <- i
 			time.Sleep(time.Millisecond)
 		}
@@ -205,14 +205,14 @@ func TestMerge_ConcurrentProduction(t *testing.T) {
 
 	// Should receive all values
 	received := make([]int, 0, 20)
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		val, ok := <-out
 		require.True(t, ok)
 		received = append(received, val)
 	}
 
 	// Should contain all values from 0-19
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		assert.Contains(t, received, i)
 	}
 	assert.Len(t, received, 20)
@@ -228,7 +228,7 @@ func TestMerge_ManyChannels(t *testing.T) {
 	channels := make([]chan int, numChannels)
 
 	// Create and fill channels
-	for i := 0; i < numChannels; i++ {
+	for i := range numChannels {
 		channels[i] = make(chan int, 1)
 		channels[i] <- i
 		close(channels[i])
@@ -244,14 +244,14 @@ func TestMerge_ManyChannels(t *testing.T) {
 
 	// Should receive all values
 	received := make([]int, 0, numChannels)
-	for i := 0; i < numChannels; i++ {
+	for range numChannels {
 		val, ok := <-out
 		require.True(t, ok)
 		received = append(received, val)
 	}
 
 	// Should contain all values
-	for i := 0; i < numChannels; i++ {
+	for i := range numChannels {
 		assert.Contains(t, received, i)
 	}
 	assert.Len(t, received, numChannels)
@@ -280,7 +280,7 @@ func TestMerge_DifferentTypes(t *testing.T) {
 				out := Merge(ctx, ch1, ch2)
 
 				received := make([]string, 0, 2)
-				for i := 0; i < 2; i++ {
+				for range 2 {
 					val, ok := <-out
 					require.True(t, ok)
 					received = append(received, val)
@@ -314,7 +314,7 @@ func TestMerge_DifferentTypes(t *testing.T) {
 				out := Merge(ctx, ch1, ch2)
 
 				received := make([]TestStruct, 0, 2)
-				for i := 0; i < 2; i++ {
+				for range 2 {
 					val, ok := <-out
 					require.True(t, ok)
 					received = append(received, val)
@@ -549,7 +549,7 @@ func TestFanOut_ConcurrentConsumption(t *testing.T) {
 	received := make([][]int, 3)
 	var wg sync.WaitGroup
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -698,23 +698,19 @@ func TestFanOut_SlowConsumer(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Slow consumer for channel 0
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for val := range outs[0] {
 			received[0] = append(received[0], val)
 			time.Sleep(10 * time.Millisecond) // slow consumption
 		}
-	}()
+	})
 
 	// Fast consumer for channel 1
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for val := range outs[1] {
 			received[1] = append(received[1], val)
 		}
-	}()
+	})
 
 	wg.Wait()
 
@@ -732,7 +728,7 @@ func TestMerge_FanOut_Integration(t *testing.T) {
 	ch3 := make(chan int, 3)
 
 	// Fill input channels
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		ch1 <- i
 		ch2 <- i + 10
 		ch3 <- i + 20
@@ -765,7 +761,7 @@ func TestMerge_FanOut_Integration(t *testing.T) {
 	wg.Wait()
 
 	// Should contain all values from 0-2, 10-12, 20-22
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		assert.Contains(t, allValues, i)
 		assert.Contains(t, allValues, i+10)
 		assert.Contains(t, allValues, i+20)

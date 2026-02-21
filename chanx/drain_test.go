@@ -124,7 +124,7 @@ func TestOrDone_SlowConsumer(t *testing.T) {
 	in := make(chan int, 100)
 
 	// Fill input channel
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		in <- i
 	}
 	close(in)
@@ -133,7 +133,7 @@ func TestOrDone_SlowConsumer(t *testing.T) {
 
 	// Slow consumer - add delay between receives
 	received := make([]int, 0, 50)
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		val, ok := <-out
 		require.True(t, ok)
 		received = append(received, val)
@@ -157,7 +157,7 @@ func TestOrDone_ConcurrentAccess(t *testing.T) {
 
 	// Start producer
 	go func() {
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			in <- i
 			time.Sleep(time.Millisecond)
 		}
@@ -169,13 +169,11 @@ func TestOrDone_ConcurrentAccess(t *testing.T) {
 	// Start consumer with proper synchronization
 	received := make([]int, 0, 100)
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for val := range out {
 			received = append(received, val)
 		}
-	}()
+	})
 
 	// Wait for consumer to finish
 	wg.Wait()
@@ -319,7 +317,7 @@ func TestDrain_BasicFunctionality(t *testing.T) {
 	ch := make(chan int, 5)
 
 	// Fill channel
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		ch <- i
 	}
 	close(ch) // Drain expects channel to be closed
@@ -363,7 +361,7 @@ func TestDrain_ConcurrentDrain(t *testing.T) {
 	ch := make(chan int, 100)
 
 	// Fill channel
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		ch <- i
 	}
 	close(ch) // Drain expects channel to be closed
@@ -395,7 +393,7 @@ func TestDrain_WithActiveProducer(t *testing.T) {
 	producerDone := make(chan struct{})
 	go func() {
 		defer close(producerDone)
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			ch <- i
 			time.Sleep(time.Millisecond)
 		}
@@ -469,7 +467,7 @@ func TestDrain_LargeChannel(t *testing.T) {
 	ch := make(chan int, 10000)
 
 	// Fill channel with many values
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		ch <- i
 	}
 	close(ch)
@@ -493,7 +491,7 @@ func TestDrain_Integration(t *testing.T) {
 	go func() {
 		defer close(producerDone)
 		defer close(ch) // Producer closes channel when done
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			ch <- i
 			time.Sleep(time.Millisecond)
 		}
@@ -515,7 +513,7 @@ func TestOrDone_Drain_Integration(t *testing.T) {
 	in := make(chan int, 10)
 
 	// Fill input channel and close it
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		in <- i
 	}
 	close(in)
@@ -523,7 +521,7 @@ func TestOrDone_Drain_Integration(t *testing.T) {
 	out := OrDone(ctx, in)
 
 	// Drain some values
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		val, ok := <-out
 		require.True(t, ok)
 		assert.Equal(t, i, val)

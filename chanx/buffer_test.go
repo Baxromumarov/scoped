@@ -12,7 +12,7 @@ import (
 func TestBuffer_BasicFunctionality(t *testing.T) {
 	ctx := context.Background()
 	in := make(chan int, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		in <- i
 	}
 	close(in)
@@ -35,7 +35,7 @@ func TestBuffer_BasicFunctionality(t *testing.T) {
 func TestBuffer_ExactBatchSize(t *testing.T) {
 	ctx := context.Background()
 	in := make(chan int, 6)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		in <- i
 	}
 	close(in)

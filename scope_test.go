@@ -76,7 +76,7 @@ func TestNestedTasks(t *testing.T) {
 func TestRunAllSuccess(t *testing.T) {
 	var count atomic.Int32
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			sp.Spawn("task", func(ctx context.Context, _ scoped.Spawner) error {
 				count.Add(1)
 				return nil
@@ -137,7 +137,7 @@ func TestWithPolicyInvalidPanics(t *testing.T) {
 func TestRunFailFast(t *testing.T) {
 	sentinel := errors.New("task-3 failed")
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			sp.Spawn(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				if i == 3 {
 					return sentinel
@@ -159,7 +159,7 @@ func TestRunFailFastCancelsOthers(t *testing.T) {
 
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
 		// Long-running tasks
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			sp.Spawn("worker", func(ctx context.Context, _ scoped.Spawner) error {
 				started <- struct{}{} // signal ready
 				<-ctx.Done()
@@ -169,7 +169,7 @@ func TestRunFailFastCancelsOthers(t *testing.T) {
 		}
 
 		// Ensure all workers are started
-		for i := 0; i < 5; i++ {
+		for range 5 {
 			<-started
 		}
 
@@ -190,7 +190,7 @@ func TestRunFailFastCancelsOthers(t *testing.T) {
 
 func TestRunCollect(t *testing.T) {
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			sp.Spawn(fmt.Sprintf("task-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				return fmt.Errorf("error-%d", i)
 			})
@@ -215,7 +215,7 @@ func TestRunCollectNoCancellation(t *testing.T) {
 			return errors.New("fail")
 		})
 		// ...but siblings should NOT be cancelled.
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			sp.Spawn("worker", func(ctx context.Context, _ scoped.Spawner) error {
 				time.Sleep(20 * time.Millisecond)
 				completed.Add(1)
@@ -287,7 +287,7 @@ func TestRunMultiplePanicsFirstReRaised(t *testing.T) {
 	}()
 
 	_ = scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			sp.Spawn(fmt.Sprintf("p-%d", i), func(ctx context.Context, _ scoped.Spawner) error {
 				panic(fmt.Sprintf("panic-%d", i))
 			})
@@ -301,7 +301,7 @@ func TestRunLimit(t *testing.T) {
 	var maxActive atomic.Int32
 
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		for i := 0; i < 20; i++ {
+		for range 20 {
 			sp.Spawn("worker", func(ctx context.Context, _ scoped.Spawner) error {
 				cur := active.Add(1)
 				// Record the high-water mark.
@@ -399,7 +399,7 @@ func TestRunSubTasks(t *testing.T) {
 		sp.Spawn("parent", func(ctx context.Context, sp scoped.Spawner) error {
 			count.Add(1)
 			// Spawn children from within a task.
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				sp.Spawn("child", func(ctx context.Context, _ scoped.Spawner) error {
 					count.Add(1)
 					return nil
@@ -697,7 +697,7 @@ func TestRunStress(t *testing.T) {
 	const n = 10000
 	var count atomic.Int32
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		for i := 0; i < n; i++ {
+		for range n {
 			sp.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 				count.Add(1)
 				return nil
@@ -719,7 +719,7 @@ func TestRunStressWithLimit(t *testing.T) {
 	const n = 10000
 	var count atomic.Int32
 	err := scoped.Run(context.Background(), func(sp scoped.Spawner) {
-		for i := 0; i < n; i++ {
+		for range n {
 			sp.Spawn("", func(ctx context.Context, _ scoped.Spawner) error {
 				count.Add(1)
 				return nil
@@ -767,7 +767,7 @@ func TestRun_SubTasks(t *testing.T) {
 		sp.Spawn("parent", func(ctx context.Context, sp scoped.Spawner) error {
 			count.Add(1)
 
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				sp.Spawn("child", func(ctx context.Context, _ scoped.Spawner) error {
 					count.Add(1)
 					return nil
@@ -840,9 +840,7 @@ func TestSpawnRaceCloseAdd(t *testing.T) {
 
 		// Spawn many tasks concurrently while triggering Wait (which closes).
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// Spawn as fast as possible; some will panic after close — that's OK.
 			for range 50 {
 				func() {
@@ -852,7 +850,7 @@ func TestSpawnRaceCloseAdd(t *testing.T) {
 					})
 				}()
 			}
-		}()
+		})
 
 		// Wait closes the root spawner and finalizes.
 		_ = sc.Wait()

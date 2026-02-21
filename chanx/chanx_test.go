@@ -74,7 +74,7 @@ func TestSend_Concurrent(t *testing.T) {
 	ctx := context.Background()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		wg.Add(1)
 		go func(val int) {
 			defer wg.Done()
@@ -321,24 +321,20 @@ func TestSendRecv_ConcurrentProducerConsumer(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Producer
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer close(ch)
-		for i := 0; i < numItems; i++ {
+		for i := range numItems {
 			err := Send(ctx, ch, i)
 			if err != nil {
 				t.Errorf("Send failed: %v", err)
 				return
 			}
 		}
-	}()
+	})
 
 	// Consumer
 	received := make([]int, 0, numItems)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			val, ok, err := Recv(ctx, ch)
 			if err != nil {
@@ -350,7 +346,7 @@ func TestSendRecv_ConcurrentProducerConsumer(t *testing.T) {
 			}
 			received = append(received, val)
 		}
-	}()
+	})
 
 	wg.Wait()
 	assert.Equal(t, numItems, len(received))

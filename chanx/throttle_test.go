@@ -30,7 +30,7 @@ func TestThrottle_BasicFunctionality(t *testing.T) {
 func TestThrottle_RateLimiting(t *testing.T) {
 	ctx := context.Background()
 	in := make(chan int, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		in <- i
 	}
 	close(in)

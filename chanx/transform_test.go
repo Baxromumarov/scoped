@@ -243,7 +243,7 @@ func TestMap_Streaming(t *testing.T) {
 	out := Map(ctx, in, func(v int) int { return v + 10 })
 
 	go func() {
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			in <- i
 		}
 		close(in)

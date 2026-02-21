@@ -119,7 +119,7 @@ func TestFirst_OnlyFirstValue(t *testing.T) {
 func TestFirst_ConcurrentSenders(t *testing.T) {
 	const n = 10
 	chs := make([]<-chan int, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		ch := make(chan int, 1)
 		ch <- i
 		chs[i] = ch

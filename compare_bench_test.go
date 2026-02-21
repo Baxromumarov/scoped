@@ -10,8 +10,8 @@ import (
 
 	"github.com/baxromumarov/scoped"
 	"github.com/sourcegraph/conc"
-	concpool "github.com/sourcegraph/conc/pool"
 	conciter "github.com/sourcegraph/conc/iter"
+	concpool "github.com/sourcegraph/conc/pool"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -26,8 +26,7 @@ func BenchmarkFanOut_Native(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				var wg sync.WaitGroup
 				for range n {
-					wg.Add(1)
-					go func() { wg.Done() }()
+					wg.Go(func() {})
 				}
 				wg.Wait()
 			}
@@ -340,11 +339,9 @@ func BenchmarkResult_Native(b *testing.B) {
 		results := make([]int, 50)
 		var wg sync.WaitGroup
 		for j := range 50 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				results[j] = j * 2
-			}()
+			})
 		}
 		wg.Wait()
 		_ = results
@@ -388,11 +385,9 @@ func BenchmarkOverheadPerTask_Native(b *testing.B) {
 	var counter atomic.Int64
 	for i := 0; i < b.N; i++ {
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
+		wg.Go(func() {
 			counter.Add(1)
-			wg.Done()
-		}()
+		})
 		wg.Wait()
 	}
 }
